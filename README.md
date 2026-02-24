@@ -65,7 +65,7 @@ Runs every 10 minutes. Each website is visited at most once per 24 hours (tracke
 **Harvester:**
 
 - **Company**: `type="company"`, `name`, `careersUrl`, `websiteUrl`
-- **Job**: `type="job"`, `title`, `description`, `url`, `level`, `companyName`, `status` (inbox|saved|discarded), `discardReason`
+- **Job**: `type="job"`, `title`, `description`, `url`, `level`, `companyName`, `keywords` (array of {text, priority}), `status` (inbox|saved|discarded), `discardReason`
 - **harvestKnowledge**: `type="harvestKnowledge"`, `rules`, `feedbackLog`, `visitedDomains` – grows from discard feedback
 - **companyBlacklist**: `type="companyBlacklist"`, `companies` (string[]) – never harvest from these
 - **companyWhitelist**: `type="companyWhitelist"`, `companies` (string[]) – always harvest from these; LLM also discovers new companies to expand the pool
@@ -74,8 +74,7 @@ Runs every 10 minutes. Each website is visited at most once per 24 hours (tracke
 **Matcher:**
 
 - **resume**: `type="resume"`, `text` – extracted from uploaded PDF
-- **keyword**: `type="keyword"`, `text`, `priority` (high|medium|low) – linked to job via `hasKeyword`
-- Jobs get `matchScore` (0–100) after matching
+- Jobs get `matchScore` (0–100) and `keywords` (array of {text, priority}) after matching
 
 ## Publish
 

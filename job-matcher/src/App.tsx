@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { RoolClient, RoolSpace } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
-import { Briefcase, FileText, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { Briefcase, FileText, Loader2, ChevronDown, ChevronRight, Sun, Moon, Monitor } from "lucide-react";
 import { extractTextFromPdf } from "./pdfUtils";
 
 const SPACE_NAME = "Remote Job Harvest";
@@ -10,12 +10,9 @@ const RESUME_CONFIG_ID = "job-matcher-resume-config";
 
 const MATCH_PROMPT = `You have a resume and a job listing. Rate how well the resume matches the job from 0-100 (percentage). Consider: relevant experience, skills overlap, seniority fit, and domain alignment. Be strict - only high matches get 70+.
 
-Also extract 10-25 keywords from the job that represent required technical skills or soft skills. Create keyword objects with:
-- type: "keyword"
-- text: the keyword/skill
-- priority: "high" | "medium" | "low" (high = must-have, medium = important, low = nice-to-have)
-
-Link each keyword to the job via the "hasKeyword" relation. Pick the most important ones and assign priorities accordingly.`;
+Update the job object with:
+1) matchScore: the match percentage (0-100)
+2) keywords: array of {text: string, priority: "high"|"medium"|"low"} - extract 10-25 skills/techs from the job. High = must-have, medium = important, low = nice-to-have.`;
 
 type Section = "jobs" | "resumes";
 
@@ -61,6 +58,10 @@ export default function App() {
     version: number;
     text: string;
   } | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
+    const s = localStorage.getItem("job-matcher-theme");
+    return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
+  });
 
   const addLog = (type: LogEntry["type"], message: string) => {
     setLogEntries((prev) => [
@@ -86,6 +87,19 @@ export default function App() {
       roolClient.destroy();
     };
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      root.classList.toggle("dark", dark);
+      root.classList.toggle("light", !dark);
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
 
   useEffect(() => {
     if (authState !== "ready" || !client) return;
@@ -361,9 +375,9 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-zinc-950">
+    <div className="flex min-h-screen bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200">
       {/* Left Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-900/50">
+      <aside className="flex w-64 flex-col border-r border-zinc-300 bg-zinc-200/80 dark:border-zinc-800 dark:bg-zinc-900/50">
         <div className="border-b border-zinc-800 p-4">
           <h1 className="text-lg font-semibold">Job Matcher</h1>
         </div>
@@ -406,18 +420,68 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-xl font-semibold">
+        <header className="flex items-center justify-between border-b border-zinc-300 px-6 py-4 dark:border-zinc-800">
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-200">
             {section === "jobs" && "Jobs"}
             {section === "resumes" && "Resumes"}
           </h2>
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-300 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
+            <button
+              onClick={() => {
+                setTheme("light");
+                localStorage.setItem("job-matcher-theme", "light");
+              }}
+              title="Light"
+              className={`rounded p-1.5 ${
+                theme === "light"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Sun className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setTheme("dark");
+                localStorage.setItem("job-matcher-theme", "dark");
+              }}
+              title="Dark"
+              className={`rounded p-1.5 ${
+                theme === "dark"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Moon className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setTheme("system");
+                localStorage.setItem("job-matcher-theme", "system");
+              }}
+              title="System"
+              className={`rounded p-1.5 ${
+                theme === "system"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Monitor className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
           {/* Center content */}
           <div className="flex-1 overflow-auto p-6">
             {section === "jobs" && (
-              <JobsSection jobs={sortedJobs} space={space} />
+              <JobsSection
+                jobs={sortedJobs}
+                onMatchAll={handleMatchAll}
+                matching={matching}
+                hasResume={hasResume}
+                jobsCount={jobs.filter((j) => j.status !== "discarded").length}
+              />
             )}
             {section === "resumes" && (
               <ResumesSection
@@ -427,12 +491,16 @@ export default function App() {
                 onRestore={handleResumeRestore}
                 versionDetail={resumeVersionDetail}
                 setVersionDetail={setResumeVersionDetail}
+                onMatchAll={handleMatchAll}
+                matching={matching}
+                hasResume={hasResume}
+                jobsCount={jobs.filter((j) => j.status !== "discarded").length}
               />
             )}
           </div>
 
           {/* Right LLM Log panel */}
-          <div className="flex w-80 flex-col border-l border-zinc-800 bg-zinc-900/30">
+          <div className="flex w-80 flex-col border-l border-zinc-300 bg-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900/30">
             <button
               onClick={() => setLogPanelOpen((o) => !o)}
               className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
@@ -520,19 +588,41 @@ export default function App() {
 
 function JobsSection({
   jobs,
-  space,
+  onMatchAll,
+  matching,
+  hasResume,
+  jobsCount,
 }: {
   jobs: RoolObject[];
-  space: RoolSpace | null;
+  onMatchAll: () => void;
+  matching: boolean;
+  hasResume: boolean;
+  jobsCount: number;
 }) {
   return (
     <div className="space-y-4">
-      <p className="text-sm text-zinc-500">
-        Jobs sorted by match score. Upload a resume and run Match All to score.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
+          Jobs sorted by match score. Upload a resume and run Match All to score.
+        </p>
+        <button
+          onClick={onMatchAll}
+          disabled={matching || !hasResume || jobsCount === 0}
+          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {matching ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Matching…
+            </>
+          ) : (
+            "Match All Jobs"
+          )}
+        </button>
+      </div>
       <ul className="space-y-2">
         {jobs.map((j) => (
-          <JobMatchCard key={j.id} job={j} space={space} />
+          <JobMatchCard key={j.id} job={j} />
         ))}
       </ul>
       {jobs.length === 0 && (
@@ -544,21 +634,21 @@ function JobsSection({
   );
 }
 
-function JobMatchCard({
-  job,
-  space,
-}: {
-  job: RoolObject;
-  space: RoolSpace | null;
-}) {
-  const [keywords, setKeywords] = useState<RoolObject[]>([]);
+type JobTag = { text: string; priority?: string };
+
+function getJobTags(job: RoolObject): JobTag[] {
+  const kw = job.keywords;
+  if (!Array.isArray(kw)) return [];
+  return kw.filter(
+    (x): x is JobTag =>
+      typeof x === "object" && x !== null && typeof (x as JobTag).text === "string"
+  );
+}
+
+function JobMatchCard({ job }: { job: RoolObject }) {
   const [expanded, setExpanded] = useState(false);
 
-  useEffect(() => {
-    if (!space || !expanded) return;
-    space.getChildren(job.id, "hasKeyword").then(setKeywords);
-  }, [space, job.id, expanded]);
-
+  const tags = getJobTags(job);
   const matchScore = Number(job.matchScore);
   const scoreColor =
     matchScore >= 70
@@ -568,10 +658,10 @@ function JobMatchCard({
         : "text-zinc-500";
 
   return (
-    <li className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+    <li className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <strong className="text-zinc-200">{String(job.title ?? "Unknown")}</strong>
+          <strong className="text-zinc-900 dark:text-zinc-200">{String(job.title ?? "Unknown")}</strong>
           <p className="mt-1 text-sm text-zinc-500">
             {String(job.companyName ?? "")}
           </p>
@@ -596,29 +686,33 @@ function JobMatchCard({
           </span>
         </div>
       </div>
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        className="mt-3 text-sm text-zinc-500 hover:text-zinc-300"
-      >
-        {expanded ? "Hide" : "Show"} keywords
-      </button>
-      {expanded && keywords.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {keywords.map((k) => (
-            <span
-              key={k.id}
-              className={`rounded px-2 py-1 text-xs ${
-                k.priority === "high"
-                  ? "bg-blue-600/30 text-blue-400"
-                  : k.priority === "medium"
-                    ? "bg-zinc-600 text-zinc-300"
-                    : "bg-zinc-800 text-zinc-500"
-              }`}
-            >
-              {String(k.text)}
-            </span>
-          ))}
-        </div>
+      {tags.length > 0 && (
+        <>
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-3 text-sm text-zinc-500 hover:text-zinc-300"
+          >
+            {expanded ? "Hide" : "Show"} tags
+          </button>
+          {expanded && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {tags.map((k, i) => (
+                <span
+                  key={i}
+                  className={`rounded px-2 py-1 text-xs ${
+                    k.priority === "high"
+                      ? "bg-blue-600/30 text-blue-400"
+                      : k.priority === "medium"
+                        ? "bg-zinc-600 text-zinc-300"
+                        : "bg-zinc-800 text-zinc-500"
+                  }`}
+                >
+                  {String(k.text)}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </li>
   );
@@ -631,6 +725,10 @@ function ResumesSection({
   onRestore,
   versionDetail,
   setVersionDetail,
+  onMatchAll,
+  matching,
+  hasResume,
+  jobsCount,
 }: {
   resumeConfig: {
     currentText: string;
@@ -642,6 +740,10 @@ function ResumesSection({
   onRestore: (v: { version: number; text: string }) => void;
   versionDetail: { version: number; text: string } | null;
   setVersionDetail: (v: { version: number; text: string } | null) => void;
+  onMatchAll: () => void;
+  matching: boolean;
+  hasResume: boolean;
+  jobsCount: number;
 }) {
   const text = resumeConfig?.currentText ?? "";
   const version = resumeConfig?.currentVersion ?? 0;
@@ -649,12 +751,28 @@ function ResumesSection({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+      <div className="flex justify-end">
+        <button
+          onClick={onMatchAll}
+          disabled={matching || !hasResume || jobsCount === 0}
+          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {matching ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Matching…
+            </>
+          ) : (
+            "Match All Jobs"
+          )}
+        </button>
+      </div>
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
           Current resume {version > 0 ? `(v${version})` : ""}
         </h3>
         {text ? (
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm text-zinc-300">
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm text-zinc-600 dark:text-zinc-300">
             {text.slice(0, 400)}
             {text.length > 400 ? "…" : ""}
           </pre>

@@ -13,6 +13,10 @@ import {
   ChevronRight,
   Loader2,
   CheckCircle2,
+  Ban,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { JOB_FILTER_SYSTEM_INSTRUCTION } from "./prompt";
 import {
@@ -97,6 +101,13 @@ export default function App() {
   const [addWhitelistValue, setAddWhitelistValue] = useState("");
   const [addBlacklistValue, setAddBlacklistValue] = useState("");
   const [toast, setToast] = useState<{ title: string; description?: string } | null>(null);
+  const [manualHarvestCount, setManualHarvestCount] = useState(0);
+  const [harvestLog, setHarvestLog] = useState<{ ts: number; msg: string }[]>([]);
+  const [harvestProgress, setHarvestProgress] = useState(0);
+  const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
+    const s = localStorage.getItem("job-harvester-theme");
+    return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
+  });
 
   useEffect(() => {
     const roolClient = new RoolClient();
@@ -110,6 +121,20 @@ export default function App() {
       roolClient.destroy();
     };
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark =
+        theme === "dark" || (theme === "system" && media.matches);
+      root.classList.toggle("dark", dark);
+      root.classList.toggle("light", !dark);
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
 
   useEffect(() => {
     if (authState !== "ready" || !client) return;
@@ -147,6 +172,7 @@ export default function App() {
               rules: INITIAL_FILTER_RULES,
               feedbackLog: "",
               visitedDomains: "{}",
+              manualHarvestCount: 0,
             },
           });
         }
@@ -186,18 +212,21 @@ export default function App() {
       await ensureObjects();
 
       const refresh = async () => {
-        const [jobRes, companyRes, blRes, wlRes, promptRes] = await Promise.all([
-          s.findObjects({ where: { type: "job" }, limit: 200 }),
-          s.findObjects({ where: { type: "company" }, limit: 100 }),
-          s.getObject(COMPANY_BLACKLIST_ID),
-          s.getObject(COMPANY_WHITELIST_ID),
-          s.getObject(HARVEST_PROMPT_CONFIG_ID),
-        ]);
+        const [jobRes, companyRes, blRes, wlRes, promptRes, knowledgeRes] =
+          await Promise.all([
+            s.findObjects({ where: { type: "job" }, limit: 200 }),
+            s.findObjects({ where: { type: "company" }, limit: 100 }),
+            s.getObject(COMPANY_BLACKLIST_ID),
+            s.getObject(COMPANY_WHITELIST_ID),
+            s.getObject(HARVEST_PROMPT_CONFIG_ID),
+            s.getObject(HARVEST_KNOWLEDGE_ID),
+          ]);
         if (mounted) {
           setJobs(jobRes.objects);
           setCompanies(companyRes.objects);
           setBlacklist(ensureArray(blRes?.companies));
           setWhitelist(ensureArray(wlRes?.companies));
+          setManualHarvestCount(Number(knowledgeRes?.manualHarvestCount ?? 0));
           const cfg = promptRes;
           if (cfg) {
             setPromptConfig({
@@ -239,27 +268,59 @@ export default function App() {
     const promptText = String(cfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
     setHarvesting(true);
     setLastMessage(null);
+    setHarvestLog([]);
+    setHarvestProgress(0);
     setLlmPanelOpen(true);
+
+    const addLog = (msg: string) => {
+      setHarvestLog((prev) => [...prev, { ts: Date.now(), msg }]);
+    };
+    addLog("Starting harvest (max ~1 min)…");
+
+    const startTime = Date.now();
+    const maxMs = 60_000;
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      setHarvestProgress(Math.min(100, (elapsed / maxMs) * 100));
+    }, 200);
+
     try {
       const { message, objects } = await space.prompt(promptText, {
         effort: "REASONING",
       });
+      clearInterval(progressInterval);
+      setHarvestProgress(100);
       setLastMessage(message);
+      addLog(`AI: ${message}`);
+
       const [jobRes, companyRes] = await Promise.all([
         space.findObjects({ where: { type: "job" }, limit: 200 }),
         space.findObjects({ where: { type: "company" }, limit: 100 }),
       ]);
       setJobs(jobRes.objects);
       setCompanies(companyRes.objects);
+
+      const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+      const count = Number(knowledge?.manualHarvestCount ?? 0) + 1;
+      await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+        data: { manualHarvestCount: count },
+        ephemeral: true,
+      });
+      setManualHarvestCount(count);
+
+      addLog(`Done: ${objects.length} updates, ${jobRes.objects.length} total jobs`);
       setToast({
         title: "Harvest complete",
         description: `Found ${objects.length} updates. ${jobRes.objects.length} total jobs.`,
       });
     } catch (err) {
-      setLastMessage(err instanceof Error ? err.message : "Harvest failed");
+      clearInterval(progressInterval);
+      const errMsg = err instanceof Error ? err.message : "Harvest failed";
+      setLastMessage(errMsg);
+      addLog(`Error: ${errMsg}`);
       setToast({
         title: "Harvest failed",
-        description: err instanceof Error ? err.message : "Unknown error",
+        description: errMsg,
       });
     } finally {
       setHarvesting(false);
@@ -319,11 +380,12 @@ export default function App() {
     if (!space) return;
     const cfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
     const currentVersion = Number(cfg?.currentVersion ?? 1);
+    const currentText = String(cfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
     const history = ensureVersionHistory(cfg?.versionHistory ?? []);
     const newVersion = currentVersion + 1;
     const newHistory = [
       ...history,
-      { version: newVersion, text: promptEditText, createdAt: Date.now() },
+      { version: currentVersion, text: currentText, createdAt: Date.now() },
     ];
     await space.updateObject(HARVEST_PROMPT_CONFIG_ID, {
       data: {
@@ -391,7 +453,7 @@ export default function App() {
 
     const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
     const currentLog = String(knowledge?.feedbackLog ?? "");
-    const entry = `\n[Discard] Job "${job.title}": ${reason}`;
+    const entry = `\n[Ignore] Job "${job.title}": ${reason}`;
     await space.updateObject(HARVEST_KNOWLEDGE_ID, {
       data: { feedbackLog: currentLog + entry },
       ephemeral: true,
@@ -450,9 +512,9 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-zinc-950">
+    <div className="flex min-h-screen bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200">
       {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-900/50">
+      <aside className="flex w-64 flex-col border-r border-zinc-300 bg-zinc-200/80 dark:border-zinc-800 dark:bg-zinc-900/50">
         <div className="border-b border-zinc-800 p-4">
           <h1 className="text-lg font-semibold">Job Harvester</h1>
         </div>
@@ -495,13 +557,57 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-          <h2 className="text-xl font-semibold">
+        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4 dark:border-zinc-800">
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-200">
             {section === "jobs" && "Jobs"}
             {section === "prompt" && "Harvest Prompt"}
             {section === "companies" && "Company Lists"}
             {section === "stats" && "Statistics"}
           </h2>
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-300 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
+            <button
+              onClick={() => {
+                setTheme("light");
+                localStorage.setItem("job-harvester-theme", "light");
+              }}
+              title="Light"
+              className={`rounded p-1.5 ${
+                theme === "light"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Sun className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setTheme("dark");
+                localStorage.setItem("job-harvester-theme", "dark");
+              }}
+              title="Dark"
+              className={`rounded p-1.5 ${
+                theme === "dark"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Moon className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setTheme("system");
+                localStorage.setItem("job-harvester-theme", "system");
+              }}
+              title="System"
+              className={`rounded p-1.5 ${
+                theme === "system"
+                  ? "bg-white text-blue-600 shadow dark:bg-zinc-700 dark:text-blue-400"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Monitor className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-1 flex-col overflow-auto p-6">
@@ -517,6 +623,8 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
+              onHarvest={handleHarvest}
+              harvesting={harvesting}
             />
           )}
           {section === "prompt" && (
@@ -549,15 +657,16 @@ export default function App() {
               companies={companies}
               whitelist={whitelist}
               blacklist={blacklist}
+              manualHarvestCount={manualHarvestCount}
             />
           )}
         </div>
 
         {/* LLM Output panel */}
-        <div className="border-t border-zinc-800 bg-zinc-900/30">
+        <div className="border-t border-zinc-300 bg-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900/30">
           <button
             onClick={() => setLlmPanelOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-6 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+            className="flex w-full items-center justify-between px-6 py-3 text-left text-sm text-zinc-500 hover:bg-zinc-300/50 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-200"
           >
             <span className="font-medium">
               {harvesting ? "LLM working…" : "LLM output"}
@@ -569,16 +678,42 @@ export default function App() {
             )}
           </button>
           {llmPanelOpen && (
-            <div className="max-h-40 overflow-auto border-t border-zinc-800 px-6 py-4">
-              {harvesting ? (
-                <div className="flex items-center gap-2 text-zinc-400">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Harvesting jobs from company careers pages…</span>
+            <div className="max-h-48 overflow-auto border-t border-zinc-300 px-6 py-4 dark:border-zinc-800">
+              {harvesting && (
+                <div className="mb-3">
+                  <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Max ~1 min • {Math.round(harvestProgress)}%
+                  </p>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-300 dark:bg-zinc-700">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-200"
+                      style={{ width: `${harvestProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {harvestLog.length > 0 ? (
+                <div className="space-y-1.5 text-sm">
+                  {harvestLog.map((e, i) => (
+                    <div
+                      key={i}
+                      className="flex gap-2 text-zinc-600 dark:text-zinc-400"
+                    >
+                      <span className="shrink-0 text-xs text-zinc-400">
+                        {new Date(e.ts).toLocaleTimeString()}
+                      </span>
+                      <span className="whitespace-pre-wrap break-words">
+                        {e.msg}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : lastMessage ? (
                 <div className="flex items-start gap-2 text-sm">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
-                  <p className="whitespace-pre-wrap text-zinc-300">{lastMessage}</p>
+                  <p className="whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+                    {lastMessage}
+                  </p>
                 </div>
               ) : (
                 <p className="text-sm text-zinc-500">
@@ -597,10 +732,10 @@ export default function App() {
           onClick={() => setDiscardModal(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl bg-zinc-900 p-6 shadow-xl"
+            className="w-full max-w-md rounded-xl bg-zinc-900 p-6 shadow-xl dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-1 text-lg font-semibold">Discard job</h3>
+            <h3 className="mb-1 text-lg font-semibold">Ignore job</h3>
             <p className="mb-4 text-sm text-zinc-400">
               Your reason helps the AI improve future harvests.
             </p>
@@ -622,7 +757,7 @@ export default function App() {
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                 onClick={handleDiscardConfirm}
               >
-                Discard
+                Ignore
               </button>
             </div>
           </div>
@@ -720,6 +855,8 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
+  onHarvest,
+  harvesting,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -731,10 +868,12 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
+  onHarvest: () => void;
+  harvesting: boolean;
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <button
           onClick={() => setBucket("inbox")}
           className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
@@ -779,6 +918,20 @@ function JobsSection({
             Ignored ({discardedCount})
           </button>
         )}
+        <button
+          onClick={onHarvest}
+          disabled={harvesting}
+          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {harvesting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Harvesting…
+            </>
+          ) : (
+            "Run Harvest"
+          )}
+        </button>
       </div>
 
       <ul className="space-y-2">
@@ -1096,11 +1249,13 @@ function StatsSection({
   companies,
   whitelist,
   blacklist,
+  manualHarvestCount,
 }: {
   jobs: RoolObject[];
   companies: RoolObject[];
   whitelist: string[];
   blacklist: string[];
+  manualHarvestCount: number;
 }) {
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
@@ -1108,35 +1263,50 @@ function StatsSection({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500">Manual harvests</p>
+        <p className="text-2xl font-semibold">{manualHarvestCount}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Total jobs</p>
         <p className="text-2xl font-semibold">{jobs.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Inbox</p>
         <p className="text-2xl font-semibold text-blue-400">{inboxCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Saved</p>
         <p className="text-2xl font-semibold text-yellow-500">{savedCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Ignored</p>
         <p className="text-2xl font-semibold text-red-400">{discardedCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Companies</p>
         <p className="text-2xl font-semibold">{companies.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Whitelisted</p>
         <p className="text-2xl font-semibold">{whitelist.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
         <p className="text-sm text-zinc-500">Blacklisted</p>
         <p className="text-2xl font-semibold">{blacklist.length}</p>
       </div>
     </div>
+  );
+}
+
+type JobTag = { text: string; priority?: string };
+
+function getJobTags(job: RoolObject): JobTag[] {
+  const kw = job.keywords;
+  if (!Array.isArray(kw)) return [];
+  return kw.filter(
+    (x): x is JobTag =>
+      typeof x === "object" && x !== null && typeof (x as JobTag).text === "string"
   );
 }
 
@@ -1152,13 +1322,20 @@ function JobCard({
   onDiscard: (j: RoolObject) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+
+  const tags = getJobTags(job);
+  const displayTags = tags.slice(0, 6);
+  const hasMoreTags = tags.length > 6;
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+    <li className="flex flex-col gap-2 rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <strong className="text-zinc-200">{String(job.title ?? "Unknown")}</strong>
+            <strong className="text-zinc-900 dark:text-zinc-200">
+              {String(job.title ?? "Unknown")}
+            </strong>
             {bucket === "discarded" && (
               <span className="shrink-0 rounded bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-400">
                 Ignored
@@ -1214,7 +1391,8 @@ function JobCard({
                       setMenuOpen(false);
                     }}
                   >
-                    Discard
+                    <Ban className="h-4 w-4 text-red-400" />
+                    Ignore
                   </button>
                 )}
               </div>
@@ -1226,6 +1404,39 @@ function JobCard({
         <p className="text-sm italic text-zinc-500">
           Reason: {String(job.discardReason)}
         </p>
+      )}
+      {tags.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setTagsExpanded((e) => !e)}
+            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+          >
+            {tagsExpanded ? "Hide" : "Show"} tags
+          </button>
+          {tagsExpanded && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {displayTags.map((k, i) => (
+                <span
+                  key={i}
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    k.priority === "high"
+                      ? "bg-blue-600/20 text-blue-400"
+                      : k.priority === "medium"
+                        ? "bg-zinc-600/20 text-zinc-400"
+                        : "bg-zinc-700/20 text-zinc-500"
+                  }`}
+                >
+                  {String(k.text)}
+                </span>
+              ))}
+              {hasMoreTags && (
+                <span className="rounded px-2 py-0.5 text-xs text-zinc-500">
+                  +{tags.length - 6} more
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </li>
   );
