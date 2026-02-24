@@ -487,9 +487,9 @@ export default function App() {
   if (authState === "unauthenticated") {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-xl bg-zinc-900 p-8 text-center">
-          <h1 className="mb-2 text-2xl font-semibold">Job Harvester</h1>
-          <p className="mb-6 text-zinc-400">
+        <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+          <h1 className="mb-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Job Harvester</h1>
+          <p className="mb-6 text-zinc-500 dark:text-zinc-400">
             Sign in to Rool to harvest remote software engineer jobs from company
             careers pages.
           </p>
@@ -514,7 +514,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/80">
+      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
         <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
           <h1 className="text-lg font-semibold">Job Harvester</h1>
         </div>
@@ -537,49 +537,17 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
-          <button
-            onClick={handleHarvest}
-            disabled={harvesting}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {harvesting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Harvesting…
-              </>
-            ) : (
-              "Run Harvest"
-            )}
-          </button>
-        </div>
       </aside>
 
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-          <div className="flex items-center gap-4">
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "prompt" && "Harvest Prompt"}
             {section === "companies" && "Company Lists"}
             {section === "stats" && "Statistics"}
           </h2>
-          <button
-            onClick={handleHarvest}
-            disabled={harvesting}
-            className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {harvesting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Harvesting…
-              </>
-            ) : (
-              "Run Harvest"
-            )}
-          </button>
-          </div>
           <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
             <button
               onClick={() => {
@@ -639,6 +607,8 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
+              onHarvest={handleHarvest}
+              harvesting={harvesting}
             />
           )}
           {section === "prompt" && (
@@ -692,7 +662,7 @@ export default function App() {
             )}
           </button>
           {llmPanelOpen && (
-            <div className="max-h-48 overflow-auto border-t border-zinc-300 px-6 py-4 dark:border-zinc-800">
+            <div className="max-h-48 overflow-auto border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
               {harvesting && (
                 <div className="mb-3">
                   <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
@@ -746,15 +716,15 @@ export default function App() {
           onClick={() => setDiscardModal(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl bg-zinc-900 p-6 shadow-xl dark:bg-zinc-900"
+            className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-1 text-lg font-semibold">Ignore job</h3>
-            <p className="mb-4 text-sm text-zinc-400">
+            <h3 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">Ignore job</h3>
+            <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
               Your reason helps the AI improve future harvests.
             </p>
             <textarea
-              className="mb-4 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
+              className="mb-4 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 placeholder-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:placeholder-zinc-500"
               placeholder="e.g. Not actually remote, says hybrid in the text"
               value={discardReason}
               onChange={(e) => setDiscardReason(e.target.value)}
@@ -762,7 +732,7 @@ export default function App() {
             />
             <div className="flex justify-end gap-2">
               <button
-                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 onClick={() => setDiscardModal(null)}
               >
                 Cancel
@@ -784,24 +754,24 @@ export default function App() {
           onClick={() => setPromptEditModal(false)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-1 text-lg font-semibold">
+            <h3 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
               Edit harvest prompt (new version {promptEditVersion ?? 1})
             </h3>
-            <p className="mb-4 text-sm text-zinc-400">
+            <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
               Creating a new version keeps the previous one in history.
             </p>
             <textarea
-              className="mb-4 min-h-[200px] flex-1 resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200"
+              className="mb-4 min-h-[200px] flex-1 resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
               value={promptEditText}
               onChange={(e) => setPromptEditText(e.target.value)}
               rows={12}
             />
             <div className="flex justify-end gap-2">
               <button
-                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 onClick={() => setPromptEditModal(false)}
               >
                 Cancel
@@ -823,18 +793,18 @@ export default function App() {
           onClick={() => setPromptVersionDetail(null)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-4 text-lg font-semibold">
+            <h3 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
               Version {promptVersionDetail.version}
             </h3>
-            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-sm text-zinc-300">
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
               {promptVersionDetail.text}
             </pre>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 onClick={() => setPromptVersionDetail(null)}
               >
                 Close
@@ -869,6 +839,8 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
+  onHarvest,
+  harvesting,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -880,56 +852,77 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
+  onHarvest: () => void;
+  harvesting: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex gap-6">
+      {/* Left pane: filters + Run Harvest */}
+      <div className="flex w-52 shrink-0 flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
         <button
-          onClick={() => setBucket("inbox")}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            bucket === "inbox"
-              ? "bg-blue-600 text-white"
-              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-          }`}
+          onClick={onHarvest}
+          disabled={harvesting}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          <Inbox className="mr-2 inline h-4 w-4" />
-          Inbox ({inboxCount})
+          {harvesting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Harvesting…
+            </>
+          ) : (
+            "Run Harvest"
+          )}
         </button>
-        <button
-          onClick={() => setBucket("saved")}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            bucket === "saved"
-              ? "bg-blue-600 text-white"
-              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Star className="mr-2 inline h-4 w-4 fill-yellow-500 text-yellow-500" />
-          Saved ({savedCount})
-        </button>
-        <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-200 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700">
-          <input
-            type="checkbox"
-            checked={showIgnored}
-            onChange={(e) => setShowIgnored(e.target.checked)}
-            className="rounded border-zinc-600"
-          />
-          <EyeOff className="h-4 w-4" />
-          Show ignored ({discardedCount})
-        </label>
-        {showIgnored && (
+        <div className="border-t border-zinc-200 pt-3 dark:border-zinc-700">
           <button
-            onClick={() => setBucket("discarded")}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              bucket === "discarded"
-                ? "bg-red-600/20 text-red-400"
-                : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+            onClick={() => setBucket("inbox")}
+            className={`mb-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              bucket === "inbox"
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
             }`}
           >
-            Ignored ({discardedCount})
+            <Inbox className="h-4 w-4 shrink-0" />
+            Inbox ({inboxCount})
           </button>
-        )}
+          <button
+            onClick={() => setBucket("saved")}
+            className={`mb-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              bucket === "saved"
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Star className="h-4 w-4 shrink-0 fill-yellow-500 text-yellow-500" />
+            Saved ({savedCount})
+          </button>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700">
+            <input
+              type="checkbox"
+              checked={showIgnored}
+              onChange={(e) => setShowIgnored(e.target.checked)}
+              className="rounded border-zinc-600"
+            />
+            <EyeOff className="h-4 w-4 shrink-0" />
+            Show ignored ({discardedCount})
+          </label>
+          {showIgnored && (
+            <button
+              onClick={() => setBucket("discarded")}
+              className={`mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                bucket === "discarded"
+                  ? "bg-red-600/20 text-red-500 dark:text-red-400"
+                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+              }`}
+            >
+              Ignored ({discardedCount})
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Right: job list */}
+      <div className="min-w-0 flex-1 space-y-4">
       <ul className="space-y-2">
         {filteredJobs.map((j) => (
           <JobCard
@@ -946,6 +939,7 @@ function JobsSection({
           No jobs in this bucket. Run a harvest or switch bucket.
         </p>
       )}
+      </div>
     </div>
   );
 }
@@ -976,11 +970,11 @@ function PromptSection({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
           Current prompt (v{promptConfig?.currentVersion ?? 1})
         </h3>
-        <pre className="whitespace-pre-wrap break-words text-sm text-zinc-300">
+        <pre className="whitespace-pre-wrap break-words text-sm text-zinc-700 dark:text-zinc-300">
           {text.slice(0, 400)}
           {text.length > 400 ? "…" : ""}
         </pre>
@@ -994,23 +988,23 @@ function PromptSection({
 
       {history.length > 0 && (
         <div>
-          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+          <h3 className="mb-3 text-sm font-medium text-zinc-500 dark:text-zinc-400">
             Version history
           </h3>
-          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900/50">
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Version
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Content (truncated)
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Date
                   </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600 dark:text-zinc-400">
                     Actions
                   </th>
                 </tr>
@@ -1019,27 +1013,27 @@ function PromptSection({
                 {history.map((v) => (
                   <tr
                     key={v.version}
-                    className="border-b border-zinc-800/50 last:border-0"
+                    className="border-b border-zinc-200 last:border-0 dark:border-zinc-800/50"
                   >
-                    <td className="px-4 py-3 font-mono text-zinc-300">
+                    <td className="px-4 py-3 font-mono text-zinc-700 dark:text-zinc-300">
                       v{v.version}
                     </td>
                     <td className="max-w-md px-4 py-3">
                       <button
                         onClick={() => setVersionDetail(v)}
-                        className="text-left text-zinc-400 hover:text-blue-400 hover:underline"
+                        className="text-left text-zinc-600 hover:text-blue-600 hover:underline dark:text-zinc-400 dark:hover:text-blue-400"
                       >
                         {v.text.slice(0, 80)}
                         {v.text.length > 80 ? "…" : ""}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-zinc-500">
+                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-500">
                       {new Date(v.createdAt).toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => onRestore(v)}
-                        className="text-blue-400 hover:text-blue-300"
+                        className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                       >
                         Restore
                       </button>
@@ -1078,11 +1072,11 @@ function CompaniesSection({
 }) {
   return (
     <div className="grid gap-6 md:grid-cols-2">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Whitelist ({whitelist.length}) – always harvest
         </h3>
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-500">
           Stored lowercase, trimmed. LLM also discovers new companies.
         </p>
         <div className="mb-3 flex gap-2">
@@ -1098,7 +1092,7 @@ function CompaniesSection({
                 setAddWhitelistValue("");
               }
             }}
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
+            className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 placeholder-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:placeholder-zinc-500"
           />
           <button
             onClick={() => {
@@ -1115,12 +1109,12 @@ function CompaniesSection({
           {whitelist.map((name) => (
             <li
               key={name}
-              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-800"
+              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <span className="text-sm">{name}</span>
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
               <button
                 onClick={() => onRemoveFromList(name, "whitelist")}
-                className="text-xs text-zinc-500 hover:text-red-400"
+                className="text-xs text-zinc-500 hover:text-red-500 dark:hover:text-red-400"
               >
                 Remove
               </button>
@@ -1129,8 +1123,8 @@ function CompaniesSection({
         </ul>
       </div>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Blacklist ({blacklist.length}) – never harvest
         </h3>
         <p className="mb-3 text-xs text-zinc-500">
@@ -1149,7 +1143,7 @@ function CompaniesSection({
                 setAddBlacklistValue("");
               }
             }}
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
+            className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 placeholder-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:placeholder-zinc-500"
           />
           <button
             onClick={() => {
@@ -1166,12 +1160,12 @@ function CompaniesSection({
           {blacklist.map((name) => (
             <li
               key={name}
-              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-800"
+              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <span className="text-sm">{name}</span>
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
               <button
                 onClick={() => onRemoveFromList(name, "blacklist")}
-                className="text-xs text-zinc-500 hover:text-red-400"
+                className="text-xs text-zinc-500 hover:text-red-500 dark:hover:text-red-400"
               >
                 Remove
               </button>
@@ -1181,8 +1175,8 @@ function CompaniesSection({
       </div>
 
       {companies.length > 0 && (
-        <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+        <div className="md:col-span-2 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <h3 className="mb-3 text-sm font-medium text-zinc-600 dark:text-zinc-400">
             Discovered companies ({companies.length})
           </h3>
           <p className="mb-3 text-xs text-zinc-500">
@@ -1197,20 +1191,20 @@ function CompaniesSection({
               return (
                 <li
                   key={c.id}
-                  className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50"
                 >
-                  <span className="text-sm">{name}</span>
+                  <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
                   {inWhitelist ? (
                     <button
                       onClick={() => onRemoveFromList(normalized, "whitelist")}
-                      className="text-xs text-green-400 hover:text-green-300"
+                      className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
                     >
                       ✓ Whitelist
                     </button>
                   ) : (
                     <button
                       onClick={() => onAddToList(name, "whitelist")}
-                      className="text-xs text-zinc-500 hover:text-green-400"
+                      className="text-xs text-zinc-500 hover:text-green-600 dark:hover:text-green-400"
                     >
                       + Whitelist
                     </button>
@@ -1218,14 +1212,14 @@ function CompaniesSection({
                   {inBlacklist ? (
                     <button
                       onClick={() => onRemoveFromList(normalized, "blacklist")}
-                      className="text-xs text-red-400 hover:text-red-300"
+                      className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                     >
                       ✓ Blacklist
                     </button>
                   ) : (
                     <button
                       onClick={() => onAddToList(name, "blacklist")}
-                      className="text-xs text-zinc-500 hover:text-red-400"
+                      className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
                     >
                       + Blacklist
                     </button>
@@ -1259,36 +1253,36 @@ function StatsSection({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Manual harvests</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Manual harvests</p>
         <p className="text-2xl font-semibold">{manualHarvestCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Total jobs</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Total jobs</p>
         <p className="text-2xl font-semibold">{jobs.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Inbox</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Inbox</p>
         <p className="text-2xl font-semibold text-blue-400">{inboxCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Saved</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Saved</p>
         <p className="text-2xl font-semibold text-yellow-500">{savedCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Ignored</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Ignored</p>
         <p className="text-2xl font-semibold text-red-400">{discardedCount}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Companies</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Companies</p>
         <p className="text-2xl font-semibold">{companies.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Whitelisted</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Whitelisted</p>
         <p className="text-2xl font-semibold">{whitelist.length}</p>
       </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500">Blacklisted</p>
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">Blacklisted</p>
         <p className="text-2xl font-semibold">{blacklist.length}</p>
       </div>
     </div>
@@ -1354,7 +1348,7 @@ function JobCard({
         <div className="relative">
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className="rounded p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            className="rounded p-2 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
             aria-label="Menu"
           >
             ⋮
@@ -1365,10 +1359,10 @@ function JobCard({
                 className="fixed inset-0 z-10"
                 onClick={() => setMenuOpen(false)}
               />
-              <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-zinc-700 bg-zinc-800 py-1 shadow-xl">
+              <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
                 {bucket !== "saved" && (
                   <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     onClick={() => {
                       onSave(job);
                       setMenuOpen(false);
@@ -1380,7 +1374,7 @@ function JobCard({
                 )}
                 {bucket !== "discarded" && (
                   <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     onClick={() => {
                       onDiscard(job);
                       setMenuOpen(false);

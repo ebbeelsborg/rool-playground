@@ -353,9 +353,9 @@ export default function App() {
   if (authState === "unauthenticated") {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-xl bg-zinc-900 p-8 text-center">
-          <h1 className="mb-2 text-2xl font-semibold">Job Matcher</h1>
-          <p className="mb-6 text-zinc-400">
+        <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+          <h1 className="mb-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Job Matcher</h1>
+          <p className="mb-6 text-zinc-500 dark:text-zinc-400">
             Sign in to Rool to match your resume against harvested jobs.
           </p>
           <button
@@ -377,8 +377,8 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Left Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/80">
-        <div className="border-b border-zinc-800 p-4">
+      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
           <h1 className="text-lg font-semibold">Job Matcher</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2">
@@ -390,8 +390,8 @@ export default function App() {
                 onClick={() => setSection(item.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   section === item.id
-                    ? "bg-blue-600/20 text-blue-400"
-                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    ? "bg-blue-600/20 text-blue-600 dark:text-blue-400"
+                    : "text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                 }`}
               >
                 <Icon className="h-5 w-5 shrink-0" />
@@ -400,7 +400,7 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="border-t border-zinc-800 p-2">
+        <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
           <button
             onClick={handleMatchAll}
             disabled={matching || !hasResume || jobs.length === 0}
@@ -507,7 +507,7 @@ export default function App() {
           <div className="flex w-80 flex-col border-l border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
             <button
               onClick={() => setLogPanelOpen((o) => !o)}
-              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-zinc-500 hover:bg-zinc-300/50 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-200"
             >
               <span className="font-medium">
                 {matching ? "LLM working…" : "LLM log"}
@@ -519,7 +519,7 @@ export default function App() {
               )}
             </button>
             {logPanelOpen && (
-              <div className="flex-1 overflow-auto border-t border-zinc-800 p-3">
+              <div className="flex-1 overflow-auto border-t border-zinc-200 p-3 dark:border-zinc-800">
                 <div className="space-y-2">
                   {logEntries.length === 0 ? (
                     <p className="text-sm text-zinc-500">
@@ -531,10 +531,10 @@ export default function App() {
                         key={entry.id}
                         className={`rounded px-2 py-1.5 text-xs ${
                           entry.type === "error"
-                            ? "bg-red-500/10 text-red-400"
+                            ? "bg-red-500/10 text-red-600 dark:text-red-400"
                             : entry.type === "result"
-                              ? "bg-green-500/10 text-green-400"
-                              : "bg-zinc-800/50 text-zinc-400"
+                              ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                              : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-400"
                         }`}
                       >
                         <span className="text-zinc-500">
@@ -558,18 +558,18 @@ export default function App() {
           onClick={() => setResumeVersionDetail(null)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-4 text-lg font-semibold">
+            <h3 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
               Resume version {resumeVersionDetail.version}
             </h3>
-            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-sm text-zinc-300">
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
               {resumeVersionDetail.text}
             </pre>
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 onClick={() => setResumeVersionDetail(null)}
               >
                 Close
@@ -692,10 +692,6 @@ function ResumesSection({
   onRestore,
   versionDetail,
   setVersionDetail,
-  onMatchAll,
-  matching,
-  hasResume,
-  jobsCount,
 }: {
   resumeConfig: {
     currentText: string;
@@ -740,23 +736,23 @@ function ResumesSection({
 
       {history.length > 0 && (
         <div>
-          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+          <h3 className="mb-3 text-sm font-medium text-zinc-500 dark:text-zinc-400">
             Version history
           </h3>
-          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900/50">
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Version
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Content (truncated)
                   </th>
-                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-600 dark:text-zinc-400">
                     Date
                   </th>
-                  <th className="px-4 py-3 text-right font-medium text-zinc-400">
+                  <th className="px-4 py-3 text-right font-medium text-zinc-600 dark:text-zinc-400">
                     Actions
                   </th>
                 </tr>
@@ -765,27 +761,27 @@ function ResumesSection({
                 {history.map((v) => (
                   <tr
                     key={v.version}
-                    className="border-b border-zinc-800/50 last:border-0"
+                    className="border-b border-zinc-200 last:border-0 dark:border-zinc-800/50"
                   >
-                    <td className="px-4 py-3 font-mono text-zinc-300">
+                    <td className="px-4 py-3 font-mono text-zinc-700 dark:text-zinc-300">
                       v{v.version}
                     </td>
                     <td className="max-w-md px-4 py-3">
                       <button
                         onClick={() => setVersionDetail(v)}
-                        className="text-left text-zinc-400 hover:text-blue-400 hover:underline"
+                        className="text-left text-zinc-600 hover:text-blue-600 hover:underline dark:text-zinc-400 dark:hover:text-blue-400"
                       >
                         {v.text.slice(0, 80)}
                         {v.text.length > 80 ? "…" : ""}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-zinc-500">
+                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-500">
                       {new Date(v.createdAt).toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => onRestore(v)}
-                        className="text-blue-400 hover:text-blue-300"
+                        className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                       >
                         Restore
                       </button>
