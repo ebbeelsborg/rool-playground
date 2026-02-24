@@ -375,9 +375,9 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200">
+    <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Left Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-300 bg-zinc-200/80 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/80">
         <div className="border-b border-zinc-800 p-4">
           <h1 className="text-lg font-semibold">Job Matcher</h1>
         </div>
@@ -420,12 +420,28 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-300 px-6 py-4 dark:border-zinc-800">
-          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-200">
+        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+          <div className="flex items-center gap-4">
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "resumes" && "Resumes"}
           </h2>
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-300 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
+          <button
+            onClick={handleMatchAll}
+            disabled={matching || !hasResume || jobs.filter((j) => j.status !== "discarded").length === 0}
+            className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {matching ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Matching…
+              </>
+            ) : (
+              "Match All Jobs"
+            )}
+          </button>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
             <button
               onClick={() => {
                 setTheme("light");
@@ -474,33 +490,21 @@ export default function App() {
         <div className="flex flex-1 overflow-hidden">
           {/* Center content */}
           <div className="flex-1 overflow-auto p-6">
-            {section === "jobs" && (
-              <JobsSection
-                jobs={sortedJobs}
-                onMatchAll={handleMatchAll}
-                matching={matching}
-                hasResume={hasResume}
-                jobsCount={jobs.filter((j) => j.status !== "discarded").length}
-              />
-            )}
+            {section === "jobs" && <JobsSection jobs={sortedJobs} />}
             {section === "resumes" && (
               <ResumesSection
                 resumeConfig={resumeConfig}
                 fileInputKey={fileInputKey}
                 onFileUpload={handleFileUpload}
-                onRestore={handleResumeRestore}
-                versionDetail={resumeVersionDetail}
-                setVersionDetail={setResumeVersionDetail}
-                onMatchAll={handleMatchAll}
-                matching={matching}
-                hasResume={hasResume}
-                jobsCount={jobs.filter((j) => j.status !== "discarded").length}
-              />
+              onRestore={handleResumeRestore}
+              versionDetail={resumeVersionDetail}
+              setVersionDetail={setResumeVersionDetail}
+            />
             )}
           </div>
 
           {/* Right LLM Log panel */}
-          <div className="flex w-80 flex-col border-l border-zinc-300 bg-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900/30">
+          <div className="flex w-80 flex-col border-l border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
             <button
               onClick={() => setLogPanelOpen((o) => !o)}
               className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
@@ -586,40 +590,12 @@ export default function App() {
   );
 }
 
-function JobsSection({
-  jobs,
-  onMatchAll,
-  matching,
-  hasResume,
-  jobsCount,
-}: {
-  jobs: RoolObject[];
-  onMatchAll: () => void;
-  matching: boolean;
-  hasResume: boolean;
-  jobsCount: number;
-}) {
+function JobsSection({ jobs }: { jobs: RoolObject[] }) {
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          Jobs sorted by match score. Upload a resume and run Match All to score.
-        </p>
-        <button
-          onClick={onMatchAll}
-          disabled={matching || !hasResume || jobsCount === 0}
-          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {matching ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Matching…
-            </>
-          ) : (
-            "Match All Jobs"
-          )}
-        </button>
-      </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        Jobs sorted by match score. Upload a resume and run Match All to score.
+      </p>
       <ul className="space-y-2">
         {jobs.map((j) => (
           <JobMatchCard key={j.id} job={j} />
@@ -646,8 +622,6 @@ function getJobTags(job: RoolObject): JobTag[] {
 }
 
 function JobMatchCard({ job }: { job: RoolObject }) {
-  const [expanded, setExpanded] = useState(false);
-
   const tags = getJobTags(job);
   const matchScore = Number(job.matchScore);
   const scoreColor =
@@ -658,7 +632,7 @@ function JobMatchCard({ job }: { job: RoolObject }) {
         : "text-zinc-500";
 
   return (
-    <li className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+    <li className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:shadow-none">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <strong className="text-zinc-900 dark:text-zinc-200">{String(job.title ?? "Unknown")}</strong>
@@ -687,32 +661,25 @@ function JobMatchCard({ job }: { job: RoolObject }) {
         </div>
       </div>
       {tags.length > 0 && (
-        <>
-          <button
-            onClick={() => setExpanded((e) => !e)}
-            className="mt-3 text-sm text-zinc-500 hover:text-zinc-300"
-          >
-            {expanded ? "Hide" : "Show"} tags
-          </button>
-          {expanded && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {tags.map((k, i) => (
-                <span
-                  key={i}
-                  className={`rounded px-2 py-1 text-xs ${
-                    k.priority === "high"
-                      ? "bg-blue-600/30 text-blue-400"
-                      : k.priority === "medium"
-                        ? "bg-zinc-600 text-zinc-300"
-                        : "bg-zinc-800 text-zinc-500"
-                  }`}
-                >
-                  {String(k.text)}
-                </span>
-              ))}
-            </div>
-          )}
-        </>
+        <div className="mt-3">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Tags:</span>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {tags.map((k, i) => (
+              <span
+                key={i}
+                className={`rounded px-2 py-0.5 text-xs ${
+                  k.priority === "high"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-600/20 dark:text-blue-400"
+                    : k.priority === "medium"
+                      ? "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
+                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700/20 dark:text-zinc-500"
+                }`}
+              >
+                {String(k.text)}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
     </li>
   );
@@ -740,10 +707,6 @@ function ResumesSection({
   onRestore: (v: { version: number; text: string }) => void;
   versionDetail: { version: number; text: string } | null;
   setVersionDetail: (v: { version: number; text: string } | null) => void;
-  onMatchAll: () => void;
-  matching: boolean;
-  hasResume: boolean;
-  jobsCount: number;
 }) {
   const text = resumeConfig?.currentText ?? "";
   const version = resumeConfig?.currentVersion ?? 0;
@@ -751,23 +714,7 @@ function ResumesSection({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <button
-          onClick={onMatchAll}
-          disabled={matching || !hasResume || jobsCount === 0}
-          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {matching ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Matching…
-            </>
-          ) : (
-            "Match All Jobs"
-          )}
-        </button>
-      </div>
-      <div className="rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
         <h3 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
           Current resume {version > 0 ? `(v${version})` : ""}
         </h3>

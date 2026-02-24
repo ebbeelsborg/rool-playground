@@ -512,10 +512,10 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-200">
+    <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-300 bg-zinc-200/80 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <div className="border-b border-zinc-800 p-4">
+      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
           <h1 className="text-lg font-semibold">Job Harvester</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2">
@@ -527,8 +527,8 @@ export default function App() {
                 onClick={() => setSection(item.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   section === item.id
-                    ? "bg-blue-600/20 text-blue-400"
-                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    ? "bg-blue-600/20 text-blue-600 dark:text-blue-400"
+                    : "text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                 }`}
               >
                 <Icon className="h-5 w-5 shrink-0" />
@@ -537,7 +537,7 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="border-t border-zinc-800 p-2">
+        <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
           <button
             onClick={handleHarvest}
             disabled={harvesting}
@@ -557,14 +557,30 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4 dark:border-zinc-800">
-          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-200">
+        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+          <div className="flex items-center gap-4">
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "prompt" && "Harvest Prompt"}
             {section === "companies" && "Company Lists"}
             {section === "stats" && "Statistics"}
           </h2>
-          <div className="flex items-center gap-1 rounded-lg border border-zinc-300 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
+          <button
+            onClick={handleHarvest}
+            disabled={harvesting}
+            className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {harvesting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Harvesting…
+              </>
+            ) : (
+              "Run Harvest"
+            )}
+          </button>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
             <button
               onClick={() => {
                 setTheme("light");
@@ -623,8 +639,6 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
-              onHarvest={handleHarvest}
-              harvesting={harvesting}
             />
           )}
           {section === "prompt" && (
@@ -663,7 +677,7 @@ export default function App() {
         </div>
 
         {/* LLM Output panel */}
-        <div className="border-t border-zinc-300 bg-zinc-200/50 dark:border-zinc-800 dark:bg-zinc-900/30">
+        <div className="border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
           <button
             onClick={() => setLlmPanelOpen((o) => !o)}
             className="flex w-full items-center justify-between px-6 py-3 text-left text-sm text-zinc-500 hover:bg-zinc-300/50 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-200"
@@ -855,8 +869,6 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
-  onHarvest,
-  harvesting,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -868,8 +880,6 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
-  onHarvest: () => void;
-  harvesting: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -879,7 +889,7 @@ function JobsSection({
           className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             bucket === "inbox"
               ? "bg-blue-600 text-white"
-              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
           }`}
         >
           <Inbox className="mr-2 inline h-4 w-4" />
@@ -890,13 +900,13 @@ function JobsSection({
           className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             bucket === "saved"
               ? "bg-blue-600 text-white"
-              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
           }`}
         >
           <Star className="mr-2 inline h-4 w-4 fill-yellow-500 text-yellow-500" />
           Saved ({savedCount})
         </button>
-        <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-700">
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-200 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700">
           <input
             type="checkbox"
             checked={showIgnored}
@@ -912,26 +922,12 @@ function JobsSection({
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               bucket === "discarded"
                 ? "bg-red-600/20 text-red-400"
-                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
             }`}
           >
             Ignored ({discardedCount})
           </button>
         )}
-        <button
-          onClick={onHarvest}
-          disabled={harvesting}
-          className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {harvesting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Harvesting…
-            </>
-          ) : (
-            "Run Harvest"
-          )}
-        </button>
       </div>
 
       <ul className="space-y-2">
@@ -1322,14 +1318,13 @@ function JobCard({
   onDiscard: (j: RoolObject) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const tags = getJobTags(job);
-  const displayTags = tags.slice(0, 6);
-  const hasMoreTags = tags.length > 6;
+  const displayTags = tags.slice(0, 8);
+  const hasMoreTags = tags.length > 8;
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-zinc-300 bg-zinc-200/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+    <li className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:shadow-none">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -1406,36 +1401,29 @@ function JobCard({
         </p>
       )}
       {tags.length > 0 && (
-        <div className="mt-2">
-          <button
-            onClick={() => setTagsExpanded((e) => !e)}
-            className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-          >
-            {tagsExpanded ? "Hide" : "Show"} tags
-          </button>
-          {tagsExpanded && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {displayTags.map((k, i) => (
-                <span
-                  key={i}
-                  className={`rounded px-2 py-0.5 text-xs ${
-                    k.priority === "high"
-                      ? "bg-blue-600/20 text-blue-400"
-                      : k.priority === "medium"
-                        ? "bg-zinc-600/20 text-zinc-400"
-                        : "bg-zinc-700/20 text-zinc-500"
-                  }`}
-                >
-                  {String(k.text)}
-                </span>
-              ))}
-              {hasMoreTags && (
-                <span className="rounded px-2 py-0.5 text-xs text-zinc-500">
-                  +{tags.length - 6} more
-                </span>
-              )}
-            </div>
-          )}
+        <div className="mt-3">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Tags:</span>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {displayTags.map((k, i) => (
+              <span
+                key={i}
+                className={`rounded px-2 py-0.5 text-xs ${
+                  k.priority === "high"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-600/20 dark:text-blue-400"
+                    : k.priority === "medium"
+                      ? "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
+                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700/20 dark:text-zinc-500"
+                }`}
+              >
+                {String(k.text)}
+              </span>
+            ))}
+            {hasMoreTags && (
+              <span className="rounded px-2 py-0.5 text-xs text-zinc-500">
+                +{tags.length - 8} more
+              </span>
+            )}
+          </div>
         </div>
       )}
     </li>
