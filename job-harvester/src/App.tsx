@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { RoolClient, RoolSpace } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
+import {
+  Briefcase,
+  FileText,
+  Building2,
+  BarChart3,
+  Star,
+  Inbox,
+  EyeOff,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  CheckCircle2,
+} from "lucide-react";
 import { JOB_FILTER_SYSTEM_INSTRUCTION } from "./prompt";
 import {
   HARVEST_KNOWLEDGE_ID,
@@ -10,11 +23,13 @@ import {
   INITIAL_FILTER_RULES,
   DEFAULT_HARVEST_PROMPT,
 } from "./constants";
+import { Toaster } from "./Toaster";
 
 const SPACE_NAME = "Remote Job Harvest";
 
 type JobStatus = "inbox" | "saved" | "discarded";
 type Bucket = "inbox" | "saved" | "discarded";
+type Section = "jobs" | "prompt" | "companies" | "stats";
 
 function getJobStatus(job: RoolObject): JobStatus {
   const s = job.status as string | undefined;
@@ -27,20 +42,33 @@ function ensureArray(arr: unknown): string[] {
   return [];
 }
 
-function ensureVersionHistory(v: unknown): { version: number; text: string; createdAt: number }[] {
+function ensureVersionHistory(
+  v: unknown
+): { version: number; text: string; createdAt: number }[] {
   if (!Array.isArray(v)) return [];
   return v.filter(
-    (x): x is { version: number; text: string; createdAt: number } =>
-      typeof x === "object" && x !== null && typeof (x as { version?: unknown }).version === "number"
+    (
+      x
+    ): x is { version: number; text: string; createdAt: number } =>
+      typeof x === "object" &&
+      x !== null &&
+      typeof (x as { version?: unknown }).version === "number"
   );
+}
+
+function normalizeCompany(name: string): string {
+  return String(name ?? "").trim().toLowerCase();
 }
 
 export default function App() {
   const [client, setClient] = useState<RoolClient | null>(null);
   const [space, setSpace] = useState<RoolSpace | null>(null);
-  const [authState, setAuthState] = useState<"loading" | "unauthenticated" | "ready">("loading");
+  const [authState, setAuthState] = useState<
+    "loading" | "unauthenticated" | "ready"
+  >("loading");
   const [harvesting, setHarvesting] = useState(false);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const [llmPanelOpen, setLlmPanelOpen] = useState(true);
   const [jobs, setJobs] = useState<RoolObject[]>([]);
   const [companies, setCompanies] = useState<RoolObject[]>([]);
   const [blacklist, setBlacklist] = useState<string[]>([]);
@@ -51,13 +79,24 @@ export default function App() {
     versionHistory: { version: number; text: string; createdAt: number }[];
   } | null>(null);
   const [bucket, setBucket] = useState<Bucket>("inbox");
-  const [discardModal, setDiscardModal] = useState<{ job: RoolObject } | null>(null);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const [section, setSection] = useState<Section>("jobs");
+  const [discardModal, setDiscardModal] = useState<{ job: RoolObject } | null>(
+    null
+  );
   const [discardReason, setDiscardReason] = useState("");
   const [promptEditModal, setPromptEditModal] = useState(false);
   const [promptEditText, setPromptEditText] = useState("");
-  const [promptEditVersion, setPromptEditVersion] = useState<number | null>(null);
+  const [promptEditVersion, setPromptEditVersion] = useState<number | null>(
+    null
+  );
+  const [promptVersionDetail, setPromptVersionDetail] = useState<{
+    version: number;
+    text: string;
+  } | null>(null);
   const [addWhitelistValue, setAddWhitelistValue] = useState("");
   const [addBlacklistValue, setAddBlacklistValue] = useState("");
+  const [toast, setToast] = useState<{ title: string; description?: string } | null>(null);
 
   useEffect(() => {
     const roolClient = new RoolClient();
@@ -200,6 +239,7 @@ export default function App() {
     const promptText = String(cfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
     setHarvesting(true);
     setLastMessage(null);
+    setLlmPanelOpen(true);
     try {
       const { message, objects } = await space.prompt(promptText, {
         effort: "REASONING",
@@ -211,27 +251,42 @@ export default function App() {
       ]);
       setJobs(jobRes.objects);
       setCompanies(companyRes.objects);
+      setToast({
+        title: "Harvest complete",
+        description: `Found ${objects.length} updates. ${jobRes.objects.length} total jobs.`,
+      });
     } catch (err) {
       setLastMessage(err instanceof Error ? err.message : "Harvest failed");
+      setToast({
+        title: "Harvest failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
     } finally {
       setHarvesting(false);
     }
   };
 
-  const handleAddToList = async (companyName: string, list: "blacklist" | "whitelist") => {
+  const handleAddToList = async (
+    companyName: string,
+    list: "blacklist" | "whitelist"
+  ) => {
     if (!space) return;
-    const id = list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
+    const id =
+      list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
     const current = list === "blacklist" ? blacklist : whitelist;
-    const name = String(companyName ?? "").trim();
+    const name = normalizeCompany(companyName);
     if (!name || current.includes(name)) return;
     const otherList = list === "blacklist" ? whitelist : blacklist;
     const next = [...current, name].filter((x) => x !== "");
 
     if (otherList.includes(name)) {
-      await space.updateObject(list === "blacklist" ? COMPANY_WHITELIST_ID : COMPANY_BLACKLIST_ID, {
-        data: { companies: otherList.filter((x) => x !== name) },
-        ephemeral: true,
-      });
+      await space.updateObject(
+        list === "blacklist" ? COMPANY_WHITELIST_ID : COMPANY_BLACKLIST_ID,
+        {
+          data: { companies: otherList.filter((x) => x !== name) },
+          ephemeral: true,
+        }
+      );
     }
     await space.updateObject(id, {
       data: { companies: next },
@@ -239,9 +294,13 @@ export default function App() {
     });
   };
 
-  const handleRemoveFromList = async (companyName: string, list: "blacklist" | "whitelist") => {
+  const handleRemoveFromList = async (
+    companyName: string,
+    list: "blacklist" | "whitelist"
+  ) => {
     if (!space) return;
-    const id = list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
+    const id =
+      list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
     const current = list === "blacklist" ? blacklist : whitelist;
     const next = current.filter((x) => x !== companyName);
     await space.updateObject(id, {
@@ -309,7 +368,10 @@ export default function App() {
 
   const handleSave = async (job: RoolObject) => {
     if (!space) return;
-    await space.updateObject(job.id, { data: { status: "saved" }, ephemeral: true });
+    await space.updateObject(job.id, {
+      data: { status: "saved" },
+      ephemeral: true,
+    });
   };
 
   const handleDiscardOpen = (job: RoolObject) => {
@@ -339,28 +401,40 @@ export default function App() {
     setDiscardReason("");
   };
 
-  const filteredJobs = jobs.filter((j) => getJobStatus(j) === bucket);
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
   const discardedCount = jobs.filter((j) => getJobStatus(j) === "discarded").length;
 
+  const visibleBuckets: Bucket[] = showIgnored
+    ? ["inbox", "saved", "discarded"]
+    : ["inbox", "saved"];
+  const filteredJobs = jobs.filter((j) => {
+    const status = getJobStatus(j);
+    if (status === "discarded" && !showIgnored) return false;
+    return bucket === status;
+  });
+
   if (authState === "loading") {
     return (
-      <div style={styles.center}>
-        <p>Connecting to Rool...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-zinc-400">Connecting to Rool...</p>
       </div>
     );
   }
 
   if (authState === "unauthenticated") {
     return (
-      <div style={styles.center}>
-        <div style={styles.card}>
-          <h1 style={styles.title}>Job Harvester</h1>
-          <p style={styles.subtitle}>
-            Sign in to Rool to harvest remote software engineer jobs from company careers pages.
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-xl bg-zinc-900 p-8 text-center">
+          <h1 className="mb-2 text-2xl font-semibold">Job Harvester</h1>
+          <p className="mb-6 text-zinc-400">
+            Sign in to Rool to harvest remote software engineer jobs from company
+            careers pages.
           </p>
-          <button style={styles.button} onClick={handleLogin}>
+          <button
+            className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-700"
+            onClick={handleLogin}
+          >
             Sign in to Rool
           </button>
         </div>
@@ -368,222 +442,184 @@ export default function App() {
     );
   }
 
+  const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
+    { id: "jobs", label: "Jobs", icon: Briefcase },
+    { id: "prompt", label: "Prompt", icon: FileText },
+    { id: "companies", label: "Companies", icon: Building2 },
+    { id: "stats", label: "Stats", icon: BarChart3 },
+  ];
+
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.logo}>Job Harvester</h1>
-        <button
-          style={{ ...styles.button, ...styles.primaryButton }}
-          onClick={handleHarvest}
-          disabled={harvesting}
-        >
-          {harvesting ? "Harvesting…" : "Run Harvest"}
-        </button>
-      </header>
-
-      <main style={styles.main}>
-        {lastMessage && (
-          <div style={styles.message}>
-            <strong>AI:</strong> {lastMessage}
-          </div>
-        )}
-
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Harvest Prompt (v{promptConfig?.currentVersion ?? 1})</h2>
-          <pre style={styles.promptPreview}>
-            {(promptConfig?.currentText ?? DEFAULT_HARVEST_PROMPT).slice(0, 300)}
-            {(promptConfig?.currentText ?? "").length > 300 ? "…" : ""}
-          </pre>
-          <button style={styles.smallButton} onClick={handlePromptEditOpen}>
-            Edit prompt
+    <div className="flex min-h-screen bg-zinc-950">
+      {/* Sidebar */}
+      <aside className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-900/50">
+        <div className="border-b border-zinc-800 p-4">
+          <h1 className="text-lg font-semibold">Job Harvester</h1>
+        </div>
+        <nav className="flex-1 space-y-1 p-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setSection(item.id)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  section === item.id
+                    ? "bg-blue-600/20 text-blue-400"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="border-t border-zinc-800 p-2">
+          <button
+            onClick={handleHarvest}
+            disabled={harvesting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {harvesting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Harvesting…
+              </>
+            ) : (
+              "Run Harvest"
+            )}
           </button>
-          {promptConfig && promptConfig.versionHistory.length > 0 && (
-            <div style={styles.versionHistory}>
-              <strong>Version history:</strong>
-              {[...promptConfig.versionHistory].reverse().map((v) => (
-                <div key={v.version} style={styles.versionRow}>
-                  <button
-                    style={styles.versionItem}
-                    onClick={() => handlePromptVersionSelect(v)}
-                  >
-                    v{v.version} – {new Date(v.createdAt).toLocaleString()}
-                  </button>
-                  <button
-                    style={styles.smallButton}
-                    onClick={() => handlePromptRestore(v)}
-                  >
-                    Restore
-                  </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+          <h2 className="text-xl font-semibold">
+            {section === "jobs" && "Jobs"}
+            {section === "prompt" && "Harvest Prompt"}
+            {section === "companies" && "Company Lists"}
+            {section === "stats" && "Statistics"}
+          </h2>
+        </header>
+
+        <div className="flex flex-1 flex-col overflow-auto p-6">
+          {section === "jobs" && (
+            <JobsSection
+              bucket={bucket}
+              setBucket={setBucket}
+              showIgnored={showIgnored}
+              setShowIgnored={setShowIgnored}
+              inboxCount={inboxCount}
+              savedCount={savedCount}
+              discardedCount={discardedCount}
+              filteredJobs={filteredJobs}
+              onSave={handleSave}
+              onDiscard={handleDiscardOpen}
+            />
+          )}
+          {section === "prompt" && (
+            <PromptSection
+              promptConfig={promptConfig}
+              onEdit={handlePromptEditOpen}
+              onVersionSelect={handlePromptVersionSelect}
+              onRestore={handlePromptRestore}
+              versionDetail={promptVersionDetail}
+              setVersionDetail={setPromptVersionDetail}
+              defaultPrompt={DEFAULT_HARVEST_PROMPT}
+            />
+          )}
+          {section === "companies" && (
+            <CompaniesSection
+              whitelist={whitelist}
+              blacklist={blacklist}
+              addWhitelistValue={addWhitelistValue}
+              setAddWhitelistValue={setAddWhitelistValue}
+              addBlacklistValue={addBlacklistValue}
+              setAddBlacklistValue={setAddBlacklistValue}
+              onAddToList={handleAddToList}
+              onRemoveFromList={handleRemoveFromList}
+              companies={companies}
+            />
+          )}
+          {section === "stats" && (
+            <StatsSection
+              jobs={jobs}
+              companies={companies}
+              whitelist={whitelist}
+              blacklist={blacklist}
+            />
+          )}
+        </div>
+
+        {/* LLM Output panel */}
+        <div className="border-t border-zinc-800 bg-zinc-900/30">
+          <button
+            onClick={() => setLlmPanelOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-6 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+          >
+            <span className="font-medium">
+              {harvesting ? "LLM working…" : "LLM output"}
+            </span>
+            {llmPanelOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </button>
+          {llmPanelOpen && (
+            <div className="max-h-40 overflow-auto border-t border-zinc-800 px-6 py-4">
+              {harvesting ? (
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Harvesting jobs from company careers pages…</span>
                 </div>
-              ))}
+              ) : lastMessage ? (
+                <div className="flex items-start gap-2 text-sm">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+                  <p className="whitespace-pre-wrap text-zinc-300">{lastMessage}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  Run a harvest to see AI output here.
+                </p>
+              )}
             </div>
           )}
-        </section>
-
-        <div style={styles.grid}>
-          <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>Whitelist ({whitelist.length})</h2>
-            <p style={styles.listHint}>
-              Always harvest from these. LLM also discovers new companies to expand the pool.
-            </p>
-            <div style={styles.addRow}>
-              <input
-                style={styles.addInput}
-                placeholder="Add company name"
-                value={addWhitelistValue}
-                onChange={(e) => setAddWhitelistValue(e.target.value)}
-              />
-              <button
-                style={styles.smallButton}
-                onClick={() => {
-                  const v = addWhitelistValue.trim();
-                  if (v) handleAddToList(v, "whitelist");
-                  setAddWhitelistValue("");
-                }}
-              >
-                Add
-              </button>
-            </div>
-            <ul style={styles.list}>
-              {whitelist.map((name) => (
-                <li key={name} style={styles.listItem}>
-                  <span>{name}</span>
-                  <button
-                    style={styles.removeBtn}
-                    onClick={() => handleRemoveFromList(name, "whitelist")}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>Blacklist ({blacklist.length})</h2>
-            <p style={styles.listHint}>Never harvest from these companies</p>
-            <div style={styles.addRow}>
-              <input
-                style={styles.addInput}
-                placeholder="Add company name"
-                value={addBlacklistValue}
-                onChange={(e) => setAddBlacklistValue(e.target.value)}
-              />
-              <button
-                style={styles.smallButton}
-                onClick={() => {
-                  const v = addBlacklistValue.trim();
-                  if (v) handleAddToList(v, "blacklist");
-                  setAddBlacklistValue("");
-                }}
-              >
-                Add
-              </button>
-            </div>
-            <ul style={styles.list}>
-              {blacklist.map((name) => (
-                <li key={name} style={styles.listItem}>
-                  <span>{name}</span>
-                  <button
-                    style={styles.removeBtn}
-                    onClick={() => handleRemoveFromList(name, "blacklist")}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-
-        <div style={styles.tabs}>
-          <button
-            style={{
-              ...styles.tab,
-              ...(bucket === "inbox" ? styles.tabActive : {}),
-            }}
-            onClick={() => setBucket("inbox")}
-          >
-            Inbox ({inboxCount})
-          </button>
-          <button
-            style={{
-              ...styles.tab,
-              ...(bucket === "saved" ? styles.tabActive : {}),
-            }}
-            onClick={() => setBucket("saved")}
-          >
-            ★ Saved ({savedCount})
-          </button>
-          <button
-            style={{
-              ...styles.tab,
-              ...(bucket === "discarded" ? styles.tabActive : {}),
-            }}
-            onClick={() => setBucket("discarded")}
-          >
-            Discarded ({discardedCount})
-          </button>
-        </div>
-
-        <div style={styles.grid}>
-          <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>Companies ({companies.length})</h2>
-            <ul style={styles.list}>
-              {companies.map((c) => (
-                <CompanyCard
-                  key={c.id}
-                  company={c}
-                  blacklist={blacklist}
-                  whitelist={whitelist}
-                  onAddToBlacklist={() => handleAddToList(String(c.name ?? ""), "blacklist")}
-                  onAddToWhitelist={() => handleAddToList(String(c.name ?? ""), "whitelist")}
-                  onRemoveFromBlacklist={() => handleRemoveFromList(String(c.name ?? ""), "blacklist")}
-                  onRemoveFromWhitelist={() => handleRemoveFromList(String(c.name ?? ""), "whitelist")}
-                />
-              ))}
-            </ul>
-          </section>
-
-          <section style={styles.section}>
-            <h2 style={styles.sectionTitle}>
-              {bucket === "inbox" ? "Inbox" : bucket === "saved" ? "Saved" : "Discarded"} ({filteredJobs.length})
-            </h2>
-            <ul style={styles.list}>
-              {filteredJobs.map((j) => (
-                <JobCard
-                  key={j.id}
-                  job={j}
-                  bucket={bucket}
-                  onSave={handleSave}
-                  onDiscard={handleDiscardOpen}
-                />
-              ))}
-            </ul>
-          </section>
         </div>
       </main>
 
+      {/* Modals */}
       {discardModal && (
-        <div style={styles.modalOverlay} onClick={() => setDiscardModal(null)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Discard job</h3>
-            <p style={styles.modalSubtitle}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setDiscardModal(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-zinc-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1 text-lg font-semibold">Discard job</h3>
+            <p className="mb-4 text-sm text-zinc-400">
               Your reason helps the AI improve future harvests.
             </p>
             <textarea
-              style={styles.textarea}
+              className="mb-4 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
               placeholder="e.g. Not actually remote, says hybrid in the text"
               value={discardReason}
               onChange={(e) => setDiscardReason(e.target.value)}
               rows={3}
             />
-            <div style={styles.modalActions}>
-              <button style={styles.button} onClick={() => setDiscardModal(null)}>
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                onClick={() => setDiscardModal(null)}
+              >
                 Cancel
               </button>
               <button
-                style={{ ...styles.button, ...styles.primaryButton }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                 onClick={handleDiscardConfirm}
               >
                 Discard
@@ -594,26 +630,35 @@ export default function App() {
       )}
 
       {promptEditModal && (
-        <div style={styles.modalOverlay} onClick={() => setPromptEditModal(false)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setPromptEditModal(false)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1 text-lg font-semibold">
               Edit harvest prompt (new version {promptEditVersion ?? 1})
             </h3>
-            <p style={styles.modalSubtitle}>
+            <p className="mb-4 text-sm text-zinc-400">
               Creating a new version keeps the previous one in history.
             </p>
             <textarea
-              style={{ ...styles.textarea, minHeight: 200 }}
+              className="mb-4 min-h-[200px] flex-1 resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200"
               value={promptEditText}
               onChange={(e) => setPromptEditText(e.target.value)}
               rows={12}
             />
-            <div style={styles.modalActions}>
-              <button style={styles.button} onClick={() => setPromptEditModal(false)}>
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                onClick={() => setPromptEditModal(false)}
+              >
                 Cancel
               </button>
               <button
-                style={{ ...styles.button, ...styles.primaryButton }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                 onClick={handlePromptEditSave}
               >
                 Save as new version
@@ -622,84 +667,476 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {promptVersionDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setPromptVersionDetail(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-4 text-lg font-semibold">
+              Version {promptVersionDetail.version}
+            </h3>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-sm text-zinc-300">
+              {promptVersionDetail.text}
+            </pre>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                onClick={() => setPromptVersionDetail(null)}
+              >
+                Close
+              </button>
+              <button
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                onClick={() => {
+                  handlePromptRestore(promptVersionDetail);
+                  setPromptVersionDetail(null);
+                }}
+              >
+                Restore
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Toaster toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }
 
-function CompanyCard({
-  company,
-  blacklist,
-  whitelist,
-  onAddToBlacklist,
-  onAddToWhitelist,
-  onRemoveFromBlacklist,
-  onRemoveFromWhitelist,
+function JobsSection({
+  bucket,
+  setBucket,
+  showIgnored,
+  setShowIgnored,
+  inboxCount,
+  savedCount,
+  discardedCount,
+  filteredJobs,
+  onSave,
+  onDiscard,
 }: {
-  company: RoolObject;
-  blacklist: string[];
-  whitelist: string[];
-  onAddToBlacklist: () => void;
-  onAddToWhitelist: () => void;
-  onRemoveFromBlacklist: () => void;
-  onRemoveFromWhitelist: () => void;
+  bucket: Bucket;
+  setBucket: (b: Bucket) => void;
+  showIgnored: boolean;
+  setShowIgnored: (v: boolean) => void;
+  inboxCount: number;
+  savedCount: number;
+  discardedCount: number;
+  filteredJobs: RoolObject[];
+  onSave: (j: RoolObject) => void;
+  onDiscard: (j: RoolObject) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const name = String(company.name ?? "Unknown");
-  const isBlacklisted = blacklist.includes(name);
-  const isWhitelisted = whitelist.includes(name);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setBucket("inbox")}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            bucket === "inbox"
+              ? "bg-blue-600 text-white"
+              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+          }`}
+        >
+          <Inbox className="mr-2 inline h-4 w-4" />
+          Inbox ({inboxCount})
+        </button>
+        <button
+          onClick={() => setBucket("saved")}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            bucket === "saved"
+              ? "bg-blue-600 text-white"
+              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+          }`}
+        >
+          <Star className="mr-2 inline h-4 w-4 fill-yellow-500 text-yellow-500" />
+          Saved ({savedCount})
+        </button>
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-700">
+          <input
+            type="checkbox"
+            checked={showIgnored}
+            onChange={(e) => setShowIgnored(e.target.checked)}
+            className="rounded border-zinc-600"
+          />
+          <EyeOff className="h-4 w-4" />
+          Show ignored ({discardedCount})
+        </label>
+        {showIgnored && (
+          <button
+            onClick={() => setBucket("discarded")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              bucket === "discarded"
+                ? "bg-red-600/20 text-red-400"
+                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            }`}
+          >
+            Ignored ({discardedCount})
+          </button>
+        )}
+      </div>
+
+      <ul className="space-y-2">
+        {filteredJobs.map((j) => (
+          <JobCard
+            key={j.id}
+            job={j}
+            bucket={bucket}
+            onSave={onSave}
+            onDiscard={onDiscard}
+          />
+        ))}
+      </ul>
+      {filteredJobs.length === 0 && (
+        <p className="py-8 text-center text-zinc-500">
+          No jobs in this bucket. Run a harvest or switch bucket.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PromptSection({
+  promptConfig,
+  onEdit,
+  onVersionSelect,
+  onRestore,
+  versionDetail,
+  setVersionDetail,
+  defaultPrompt,
+}: {
+  promptConfig: {
+    currentText: string;
+    currentVersion: number;
+    versionHistory: { version: number; text: string; createdAt: number }[];
+  } | null;
+  onEdit: () => void;
+  onVersionSelect: (v: { version: number; text: string }) => void;
+  onRestore: (v: { version: number; text: string }) => void;
+  versionDetail: { version: number; text: string } | null;
+  setVersionDetail: (v: { version: number; text: string } | null) => void;
+  defaultPrompt: string;
+}) {
+  const text = promptConfig?.currentText ?? defaultPrompt;
+  const history = [...(promptConfig?.versionHistory ?? [])].reverse();
 
   return (
-    <li style={styles.listItem}>
-      <div style={styles.jobCardHeader}>
-        <div>
-          <strong>{name}</strong>
-          {company.careersUrl && (
-            <a
-              href={String(company.careersUrl)}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.link}
-            >
-              Careers
-            </a>
-          )}
-        </div>
-        <div style={styles.menuContainer}>
-          <button
-            style={styles.menuButton}
-            onClick={() => setMenuOpen((o) => !o)}
-            aria-label="Menu"
-          >
-            ⋮
-          </button>
-          {menuOpen && (
-            <>
-              <div style={styles.menuBackdrop} onClick={() => setMenuOpen(false)} />
-              <div style={styles.menuDropdown}>
-                {isWhitelisted ? (
-                  <button style={styles.menuItem} onClick={() => { onRemoveFromWhitelist(); setMenuOpen(false); }}>
-                    Remove from whitelist
-                  </button>
-                ) : (
-                  <button style={styles.menuItem} onClick={() => { onAddToWhitelist(); setMenuOpen(false); }}>
-                    Add to whitelist
-                  </button>
-                )}
-                {isBlacklisted ? (
-                  <button style={styles.menuItem} onClick={() => { onRemoveFromBlacklist(); setMenuOpen(false); }}>
-                    Remove from blacklist
-                  </button>
-                ) : (
-                  <button style={styles.menuItem} onClick={() => { onAddToBlacklist(); setMenuOpen(false); }}>
-                    Add to blacklist
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+    <div className="space-y-6">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+          Current prompt (v{promptConfig?.currentVersion ?? 1})
+        </h3>
+        <pre className="whitespace-pre-wrap break-words text-sm text-zinc-300">
+          {text.slice(0, 400)}
+          {text.length > 400 ? "…" : ""}
+        </pre>
+        <button
+          onClick={onEdit}
+          className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+        >
+          Edit prompt
+        </button>
       </div>
-    </li>
+
+      {history.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+            Version history
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 bg-zinc-900/50">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Version
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Content (truncated)
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-400">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((v) => (
+                  <tr
+                    key={v.version}
+                    className="border-b border-zinc-800/50 last:border-0"
+                  >
+                    <td className="px-4 py-3 font-mono text-zinc-300">
+                      v{v.version}
+                    </td>
+                    <td className="max-w-md px-4 py-3">
+                      <button
+                        onClick={() => setVersionDetail(v)}
+                        className="text-left text-zinc-400 hover:text-blue-400 hover:underline"
+                      >
+                        {v.text.slice(0, 80)}
+                        {v.text.length > 80 ? "…" : ""}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-zinc-500">
+                      {new Date(v.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => onRestore(v)}
+                        className="text-blue-400 hover:text-blue-300"
+                      >
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompaniesSection({
+  whitelist,
+  blacklist,
+  addWhitelistValue,
+  setAddWhitelistValue,
+  addBlacklistValue,
+  setAddBlacklistValue,
+  onAddToList,
+  onRemoveFromList,
+  companies,
+}: {
+  whitelist: string[];
+  blacklist: string[];
+  addWhitelistValue: string;
+  setAddWhitelistValue: (v: string) => void;
+  addBlacklistValue: string;
+  setAddBlacklistValue: (v: string) => void;
+  onAddToList: (name: string, list: "blacklist" | "whitelist") => void;
+  onRemoveFromList: (name: string, list: "blacklist" | "whitelist") => void;
+  companies: RoolObject[];
+}) {
+  return (
+    <div className="grid gap-6 md:grid-cols-2">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+          Whitelist ({whitelist.length}) – always harvest
+        </h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          Stored lowercase, trimmed. LLM also discovers new companies.
+        </p>
+        <div className="mb-3 flex gap-2">
+          <input
+            type="text"
+            placeholder="Add company name"
+            value={addWhitelistValue}
+            onChange={(e) => setAddWhitelistValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const v = normalizeCompany(addWhitelistValue);
+                if (v) onAddToList(v, "whitelist");
+                setAddWhitelistValue("");
+              }
+            }}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
+          />
+          <button
+            onClick={() => {
+              const v = normalizeCompany(addWhitelistValue);
+              if (v) onAddToList(v, "whitelist");
+              setAddWhitelistValue("");
+            }}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+          >
+            Add
+          </button>
+        </div>
+        <ul className="space-y-1">
+          {whitelist.map((name) => (
+            <li
+              key={name}
+              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-800"
+            >
+              <span className="text-sm">{name}</span>
+              <button
+                onClick={() => onRemoveFromList(name, "whitelist")}
+                className="text-xs text-zinc-500 hover:text-red-400"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+          Blacklist ({blacklist.length}) – never harvest
+        </h3>
+        <p className="mb-3 text-xs text-zinc-500">
+          Stored lowercase, trimmed.
+        </p>
+        <div className="mb-3 flex gap-2">
+          <input
+            type="text"
+            placeholder="Add company name"
+            value={addBlacklistValue}
+            onChange={(e) => setAddBlacklistValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const v = normalizeCompany(addBlacklistValue);
+                if (v) onAddToList(v, "blacklist");
+                setAddBlacklistValue("");
+              }
+            }}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500"
+          />
+          <button
+            onClick={() => {
+              const v = normalizeCompany(addBlacklistValue);
+              if (v) onAddToList(v, "blacklist");
+              setAddBlacklistValue("");
+            }}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+          >
+            Add
+          </button>
+        </div>
+        <ul className="space-y-1">
+          {blacklist.map((name) => (
+            <li
+              key={name}
+              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-800"
+            >
+              <span className="text-sm">{name}</span>
+              <button
+                onClick={() => onRemoveFromList(name, "blacklist")}
+                className="text-xs text-zinc-500 hover:text-red-400"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {companies.length > 0 && (
+        <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+            Discovered companies ({companies.length})
+          </h3>
+          <p className="mb-3 text-xs text-zinc-500">
+            Quick-add to whitelist or blacklist
+          </p>
+          <ul className="flex flex-wrap gap-2">
+            {companies.map((c) => {
+              const name = String(c.name ?? "Unknown");
+              const normalized = normalizeCompany(name);
+              const inWhitelist = whitelist.includes(normalized);
+              const inBlacklist = blacklist.includes(normalized);
+              return (
+                <li
+                  key={c.id}
+                  className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2"
+                >
+                  <span className="text-sm">{name}</span>
+                  {inWhitelist ? (
+                    <button
+                      onClick={() => onRemoveFromList(normalized, "whitelist")}
+                      className="text-xs text-green-400 hover:text-green-300"
+                    >
+                      ✓ Whitelist
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onAddToList(name, "whitelist")}
+                      className="text-xs text-zinc-500 hover:text-green-400"
+                    >
+                      + Whitelist
+                    </button>
+                  )}
+                  {inBlacklist ? (
+                    <button
+                      onClick={() => onRemoveFromList(normalized, "blacklist")}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      ✓ Blacklist
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onAddToList(name, "blacklist")}
+                      className="text-xs text-zinc-500 hover:text-red-400"
+                    >
+                      + Blacklist
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatsSection({
+  jobs,
+  companies,
+  whitelist,
+  blacklist,
+}: {
+  jobs: RoolObject[];
+  companies: RoolObject[];
+  whitelist: string[];
+  blacklist: string[];
+}) {
+  const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
+  const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
+  const discardedCount = jobs.filter((j) => getJobStatus(j) === "discarded").length;
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Total jobs</p>
+        <p className="text-2xl font-semibold">{jobs.length}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Inbox</p>
+        <p className="text-2xl font-semibold text-blue-400">{inboxCount}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Saved</p>
+        <p className="text-2xl font-semibold text-yellow-500">{savedCount}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Ignored</p>
+        <p className="text-2xl font-semibold text-red-400">{discardedCount}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Companies</p>
+        <p className="text-2xl font-semibold">{companies.length}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Whitelisted</p>
+        <p className="text-2xl font-semibold">{whitelist.length}</p>
+      </div>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <p className="text-sm text-zinc-500">Blacklisted</p>
+        <p className="text-2xl font-semibold">{blacklist.length}</p>
+      </div>
+    </div>
   );
 }
 
@@ -711,32 +1148,41 @@ function JobCard({
 }: {
   job: RoolObject;
   bucket: Bucket;
-  onSave: (job: RoolObject) => void;
-  onDiscard: (job: RoolObject) => void;
+  onSave: (j: RoolObject) => void;
+  onDiscard: (j: RoolObject) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <li style={styles.jobItem}>
-      <div style={styles.jobCardHeader}>
-        <div style={styles.jobCardContent}>
-          <strong>{String(job.title ?? "Unknown")}</strong>
-          <span style={styles.meta}>{String(job.companyName ?? job.level ?? "")}</span>
+    <li className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <strong className="text-zinc-200">{String(job.title ?? "Unknown")}</strong>
+            {bucket === "discarded" && (
+              <span className="shrink-0 rounded bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-400">
+                Ignored
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-zinc-500">
+            {String(job.companyName ?? job.level ?? "")}
+          </p>
           {job.url && (
             <a
               href={String(job.url)}
               target="_blank"
               rel="noopener noreferrer"
-              style={styles.link}
+              className="mt-2 inline-block text-sm text-blue-400 hover:underline"
             >
-              Apply
+              Apply →
             </a>
           )}
         </div>
-        <div style={styles.menuContainer}>
+        <div className="relative">
           <button
-            style={styles.menuButton}
             onClick={() => setMenuOpen((o) => !o)}
+            className="rounded p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
             aria-label="Menu"
           >
             ⋮
@@ -744,24 +1190,25 @@ function JobCard({
           {menuOpen && (
             <>
               <div
-                style={styles.menuBackdrop}
+                className="fixed inset-0 z-10"
                 onClick={() => setMenuOpen(false)}
               />
-              <div style={styles.menuDropdown}>
+              <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-zinc-700 bg-zinc-800 py-1 shadow-xl">
                 {bucket !== "saved" && (
                   <button
-                    style={styles.menuItem}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
                     onClick={() => {
                       onSave(job);
                       setMenuOpen(false);
                     }}
                   >
-                    ★ Save
+                    <Star className="h-4 w-4" />
+                    Save
                   </button>
                 )}
                 {bucket !== "discarded" && (
                   <button
-                    style={styles.menuItem}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
                     onClick={() => {
                       onDiscard(job);
                       setMenuOpen(false);
@@ -776,240 +1223,10 @@ function JobCard({
         </div>
       </div>
       {bucket === "discarded" && job.discardReason && (
-        <div style={styles.discardReason}>
-          <em>Reason: {String(job.discardReason)}</em>
-        </div>
+        <p className="text-sm italic text-zinc-500">
+          Reason: {String(job.discardReason)}
+        </p>
       )}
     </li>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  center: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100vh",
-    padding: 24,
-  },
-  card: {
-    background: "#18181b",
-    borderRadius: 12,
-    padding: 32,
-    maxWidth: 400,
-    textAlign: "center",
-  },
-  title: { margin: "0 0 8px", fontSize: 24 },
-  subtitle: { margin: "0 0 24px", color: "#a1a1aa", fontSize: 14 },
-  button: {
-    padding: "12px 24px",
-    fontSize: 16,
-    background: "#27272a",
-    color: "#e4e4e7",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  smallButton: {
-    padding: "6px 12px",
-    fontSize: 13,
-    background: "#27272a",
-    color: "#e4e4e7",
-    border: "none",
-    borderRadius: 6,
-    cursor: "pointer",
-    marginTop: 8,
-  },
-  primaryButton: { background: "#3b82f6", color: "white" },
-  addRow: { display: "flex", gap: 8, marginBottom: 12 },
-  addInput: {
-    flex: 1,
-    padding: "8px 12px",
-    fontSize: 14,
-    background: "#27272a",
-    color: "#e4e4e7",
-    border: "1px solid #3f3f46",
-    borderRadius: 6,
-  },
-  removeBtn: {
-    padding: "2px 8px",
-    fontSize: 12,
-    background: "transparent",
-    color: "#71717a",
-    border: "1px solid #3f3f46",
-    borderRadius: 4,
-    cursor: "pointer",
-  },
-  container: { maxWidth: 1200, margin: "0 auto", padding: 24 },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 32,
-  },
-  logo: { margin: 0, fontSize: 24 },
-  main: {},
-  message: {
-    background: "#18181b",
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 24,
-    fontSize: 14,
-  },
-  promptPreview: {
-    background: "#27272a",
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 12,
-    color: "#a1a1aa",
-    whiteSpace: "pre-wrap",
-    overflow: "hidden",
-  },
-  versionHistory: {
-    marginTop: 12,
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-  },
-  versionRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-  },
-  versionItem: {
-    padding: "4px 8px",
-    fontSize: 12,
-    background: "transparent",
-    color: "#a1a1aa",
-    border: "none",
-    cursor: "pointer",
-    textAlign: "left",
-  },
-  listHint: { fontSize: 12, color: "#71717a", margin: "0 0 8px" },
-  tabs: {
-    display: "flex",
-    gap: 8,
-    marginBottom: 24,
-  },
-  tab: {
-    padding: "8px 16px",
-    fontSize: 14,
-    background: "#27272a",
-    color: "#a1a1aa",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  tabActive: { background: "#3b82f6", color: "white" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 24,
-  },
-  section: {
-    background: "#18181b",
-    borderRadius: 12,
-    padding: 20,
-  },
-  sectionTitle: { margin: "0 0 16px", fontSize: 18 },
-  list: { margin: 0, padding: 0, listStyle: "none" },
-  listItem: {
-    padding: "12px 0",
-    borderBottom: "1px solid #27272a",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  jobItem: {
-    padding: "12px 0",
-    borderBottom: "1px solid #27272a",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-  },
-  jobCardHeader: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  jobCardContent: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    flex: 1,
-  },
-  meta: { fontSize: 13, color: "#a1a1aa" },
-  link: { color: "#3b82f6", fontSize: 13, marginTop: 4 },
-  discardReason: { fontSize: 12, color: "#71717a", marginTop: 4 },
-  menuContainer: { position: "relative" },
-  menuButton: {
-    padding: "4px 8px",
-    fontSize: 18,
-    background: "transparent",
-    color: "#a1a1aa",
-    border: "none",
-    cursor: "pointer",
-    lineHeight: 1,
-  },
-  menuBackdrop: { position: "fixed", inset: 0, zIndex: 10 },
-  menuDropdown: {
-    position: "absolute",
-    top: "100%",
-    right: 0,
-    marginTop: 4,
-    background: "#27272a",
-    borderRadius: 8,
-    padding: 4,
-    minWidth: 120,
-    zIndex: 20,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-  },
-  menuItem: {
-    display: "block",
-    width: "100%",
-    padding: "8px 12px",
-    textAlign: "left",
-    background: "none",
-    border: "none",
-    color: "#e4e4e7",
-    fontSize: 14,
-    cursor: "pointer",
-    borderRadius: 4,
-  },
-  modalOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 100,
-  },
-  modal: {
-    background: "#18181b",
-    borderRadius: 12,
-    padding: 24,
-    maxWidth: 500,
-    width: "90%",
-  },
-  modalTitle: { margin: "0 0 8px", fontSize: 18 },
-  modalSubtitle: { margin: "0 0 16px", fontSize: 13, color: "#a1a1aa" },
-  textarea: {
-    width: "100%",
-    padding: 12,
-    fontSize: 14,
-    background: "#27272a",
-    color: "#e4e4e7",
-    border: "1px solid #3f3f46",
-    borderRadius: 8,
-    resize: "vertical",
-    marginBottom: 16,
-  },
-  modalActions: {
-    display: "flex",
-    gap: 12,
-    justifyContent: "flex-end",
-  },
-};

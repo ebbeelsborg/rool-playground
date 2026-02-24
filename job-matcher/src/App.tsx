@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { RoolClient, RoolSpace } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
+import { Briefcase, FileText, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { extractTextFromPdf } from "./pdfUtils";
 
 const SPACE_NAME = "Remote Job Harvest";
 const RESUME_OBJECT_ID = "job-matcher-resume";
+const RESUME_CONFIG_ID = "job-matcher-resume-config";
 
 const MATCH_PROMPT = `You have a resume and a job listing. Rate how well the resume matches the job from 0-100 (percentage). Consider: relevant experience, skills overlap, seniority fit, and domain alignment. Be strict - only high matches get 70+.
 
@@ -15,15 +17,62 @@ Also extract 10-25 keywords from the job that represent required technical skill
 
 Link each keyword to the job via the "hasKeyword" relation. Pick the most important ones and assign priorities accordingly.`;
 
+type Section = "jobs" | "resumes";
+
+type LogEntry = {
+  id: string;
+  timestamp: number;
+  type: "progress" | "result" | "error";
+  message: string;
+};
+
+function ensureVersionHistory(
+  v: unknown
+): { version: number; text: string; createdAt: number }[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (
+      x
+    ): x is { version: number; text: string; createdAt: number } =>
+      typeof x === "object" &&
+      x !== null &&
+      typeof (x as { version?: unknown }).version === "number"
+  );
+}
+
 export default function App() {
   const [client, setClient] = useState<RoolClient | null>(null);
   const [space, setSpace] = useState<RoolSpace | null>(null);
-  const [authState, setAuthState] = useState<"loading" | "unauthenticated" | "ready">("loading");
+  const [authState, setAuthState] = useState<
+    "loading" | "unauthenticated" | "ready"
+  >("loading");
   const [jobs, setJobs] = useState<RoolObject[]>([]);
-  const [resumeText, setResumeText] = useState<string | null>(null);
+  const [section, setSection] = useState<Section>("jobs");
+  const [resumeConfig, setResumeConfig] = useState<{
+    currentText: string;
+    currentVersion: number;
+    versionHistory: { version: number; text: string; createdAt: number }[];
+  } | null>(null);
   const [matching, setMatching] = useState(false);
-  const [matchProgress, setMatchProgress] = useState<string | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [logPanelOpen, setLogPanelOpen] = useState(true);
+  const [resumeVersionDetail, setResumeVersionDetail] = useState<{
+    version: number;
+    text: string;
+  } | null>(null);
+
+  const addLog = (type: LogEntry["type"], message: string) => {
+    setLogEntries((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        timestamp: Date.now(),
+        type,
+        message,
+      },
+    ]);
+  };
 
   useEffect(() => {
     const roolClient = new RoolClient();
@@ -57,12 +106,45 @@ export default function App() {
       currentSpace = s;
       setSpace(s);
 
+      const ensureResumeConfig = async () => {
+        const [cfg, resume] = await Promise.all([
+          s.getObject(RESUME_CONFIG_ID),
+          s.getObject(RESUME_OBJECT_ID),
+        ]);
+        if (!cfg) {
+          const existingText = String(resume?.text ?? "").trim();
+          const hasExisting = existingText.length > 0;
+          await s.createObject({
+            data: {
+              id: RESUME_CONFIG_ID,
+              type: "resumeConfig",
+              currentText: existingText,
+              currentVersion: hasExisting ? 1 : 0,
+              versionHistory: hasExisting
+                ? [{ version: 1, text: existingText, createdAt: Date.now() }]
+                : [],
+            },
+          });
+        }
+      };
+      await ensureResumeConfig();
+
       const refresh = async () => {
-        const jobRes = await s.findObjects({
-          where: { type: "job" },
-          limit: 200,
-        });
-        if (mounted) setJobs(jobRes.objects);
+        const [jobRes, cfgRes] = await Promise.all([
+          s.findObjects({ where: { type: "job" }, limit: 200 }),
+          s.getObject(RESUME_CONFIG_ID),
+        ]);
+        if (mounted) {
+          setJobs(jobRes.objects);
+          const cfg = cfgRes;
+          if (cfg) {
+            setResumeConfig({
+              currentText: String(cfg.currentText ?? ""),
+              currentVersion: Number(cfg.currentVersion ?? 0),
+              versionHistory: ensureVersionHistory(cfg.versionHistory),
+            });
+          }
+        }
       };
       const onObjectChange = () => refresh();
       await refresh();
@@ -92,9 +174,19 @@ export default function App() {
     if (!file || !space) return;
     try {
       const text = await extractTextFromPdf(file);
-      setResumeText(text);
-      const existing = await space.getObject(RESUME_OBJECT_ID);
-      if (existing) {
+      addLog("progress", `Resume extracted: ${text.length} characters`);
+
+      const cfg = await space.getObject(RESUME_CONFIG_ID);
+      const currentVersion = Number(cfg?.currentVersion ?? 0);
+      const history = ensureVersionHistory(cfg?.versionHistory ?? []);
+      const newVersion = currentVersion + 1;
+      const newHistory = [
+        ...history,
+        { version: newVersion, text, createdAt: Date.now() },
+      ];
+
+      const existingResume = await space.getObject(RESUME_OBJECT_ID);
+      if (existingResume) {
         await space.updateObject(RESUME_OBJECT_ID, {
           data: { text, updatedAt: Date.now() },
           ephemeral: true,
@@ -109,20 +201,44 @@ export default function App() {
           },
         });
       }
+
+      await space.updateObject(RESUME_CONFIG_ID, {
+        data: {
+          currentText: text,
+          currentVersion: newVersion,
+          versionHistory: newHistory,
+        },
+        ephemeral: true,
+      });
+
+      setResumeConfig({
+        currentText: text,
+        currentVersion: newVersion,
+        versionHistory: newHistory,
+      });
+      addLog("result", `Resume v${newVersion} saved`);
     } catch (err) {
-      console.error(err);
-      setResumeText(null);
+      addLog("error", err instanceof Error ? err.message : "Upload failed");
     }
     setFileInputKey((k) => k + 1);
   };
 
   const handleMatchAll = async () => {
-    if (!space || !resumeText) return;
-    setMatching(true);
+    if (!space || !resumeConfig?.currentText) return;
     const jobsToMatch = jobs.filter((j) => j.status !== "discarded");
+    if (jobsToMatch.length === 0) {
+      addLog("error", "No jobs to match");
+      return;
+    }
+
+    setMatching(true);
+    addLog("progress", `Starting match for ${jobsToMatch.length} jobs`);
+
     for (let i = 0; i < jobsToMatch.length; i++) {
       const job = jobsToMatch[i];
-      setMatchProgress(`Matching ${i + 1}/${jobsToMatch.length}: ${job.title}`);
+      const jobTitle = String(job.title ?? "Unknown");
+      addLog("progress", `Matching ${i + 1}/${jobsToMatch.length}: ${jobTitle}`);
+
       try {
         const { message } = await space.prompt(MATCH_PROMPT, {
           objectIds: [job.id, RESUME_OBJECT_ID],
@@ -135,43 +251,103 @@ export default function App() {
             required: ["match"],
           },
         });
+
         const parsed = JSON.parse(message || "{}");
         const match = typeof parsed.match === "number" ? parsed.match : 0;
         await space.updateObject(job.id, {
           data: { matchScore: match },
           ephemeral: true,
         });
+
+        addLog(
+          "result",
+          `${jobTitle}: ${match}% match`
+        );
       } catch (err) {
-        console.error("Match failed for", job.id, err);
+        addLog(
+          "error",
+          `${jobTitle}: ${err instanceof Error ? err.message : "Match failed"}`
+        );
       }
     }
-    setMatchProgress(null);
+
+    addLog("result", `Match complete for ${jobsToMatch.length} jobs`);
     setMatching(false);
-    const jobRes = await space.findObjects({ where: { type: "job" }, limit: 200 });
+
+    const jobRes = await space.findObjects({
+      where: { type: "job" },
+      limit: 200,
+    });
     setJobs(jobRes.objects);
+  };
+
+  const handleResumeRestore = async (v: { version: number; text: string }) => {
+    if (!space) return;
+    const cfg = await space.getObject(RESUME_CONFIG_ID);
+    const history = ensureVersionHistory(cfg?.versionHistory ?? []);
+
+    const existingResume = await space.getObject(RESUME_OBJECT_ID);
+    if (existingResume) {
+      await space.updateObject(RESUME_OBJECT_ID, {
+        data: { text: v.text, updatedAt: Date.now() },
+        ephemeral: true,
+      });
+    } else {
+      await space.createObject({
+        data: {
+          id: RESUME_OBJECT_ID,
+          type: "resume",
+          text: v.text,
+          updatedAt: Date.now(),
+        },
+      });
+    }
+
+    await space.updateObject(RESUME_CONFIG_ID, {
+      data: {
+        currentText: v.text,
+        currentVersion: v.version,
+        versionHistory: history,
+      },
+      ephemeral: true,
+    });
+
+    setResumeConfig({
+      currentText: v.text,
+      currentVersion: v.version,
+      versionHistory: history,
+    });
+    setResumeVersionDetail(null);
+    addLog("result", `Restored resume v${v.version}`);
   };
 
   const sortedJobs = [...jobs]
     .filter((j) => j.status !== "discarded")
     .sort((a, b) => (Number(b.matchScore) ?? 0) - (Number(a.matchScore) ?? 0));
 
+  const hasResume = (resumeConfig?.currentText?.length ?? 0) > 0;
+  const resumeHistory = [...(resumeConfig?.versionHistory ?? [])].reverse();
+
   if (authState === "loading") {
     return (
-      <div style={styles.center}>
-        <p>Connecting to Rool...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-zinc-400">Connecting to Rool...</p>
       </div>
     );
   }
 
   if (authState === "unauthenticated") {
     return (
-      <div style={styles.center}>
-        <div style={styles.card}>
-          <h1 style={styles.title}>Job Matcher</h1>
-          <p style={styles.subtitle}>
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-xl bg-zinc-900 p-8 text-center">
+          <h1 className="mb-2 text-2xl font-semibold">Job Matcher</h1>
+          <p className="mb-6 text-zinc-400">
             Sign in to Rool to match your resume against harvested jobs.
           </p>
-          <button style={styles.button} onClick={handleLogin}>
+          <button
+            className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white hover:bg-blue-700"
+            onClick={handleLogin}
+          >
             Sign in to Rool
           </button>
         </div>
@@ -179,59 +355,202 @@ export default function App() {
     );
   }
 
+  const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
+    { id: "jobs", label: "Jobs", icon: Briefcase },
+    { id: "resumes", label: "Resumes", icon: FileText },
+  ];
+
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.logo}>Job Matcher</h1>
-        <div style={styles.uploadRow}>
-          <label style={styles.uploadLabel}>
-            <input
-              key={fileInputKey}
-              type="file"
-              accept=".pdf"
-              onChange={handleFileUpload}
-              style={{ display: "none" }}
-            />
-            Upload Resume (PDF)
-          </label>
-          {resumeText && (
-            <span style={styles.uploadStatus}>
-              ✓ Resume loaded ({resumeText.length} chars)
-            </span>
-          )}
+    <div className="flex min-h-screen bg-zinc-950">
+      {/* Left Sidebar */}
+      <aside className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-900/50">
+        <div className="border-b border-zinc-800 p-4">
+          <h1 className="text-lg font-semibold">Job Matcher</h1>
         </div>
-      </header>
-
-      <main style={styles.main}>
-        <div style={styles.actions}>
+        <nav className="flex-1 space-y-1 p-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setSection(item.id)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  section === item.id
+                    ? "bg-blue-600/20 text-blue-400"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="border-t border-zinc-800 p-2">
           <button
-            style={{ ...styles.button, ...styles.primaryButton }}
             onClick={handleMatchAll}
-            disabled={matching || !resumeText || jobs.length === 0}
+            disabled={matching || !hasResume || jobs.length === 0}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {matching ? "Matching…" : "Match All Jobs"}
+            {matching ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Matching…
+              </>
+            ) : (
+              "Match All Jobs"
+            )}
           </button>
-          {matchProgress && (
-            <span style={styles.progress}>{matchProgress}</span>
-          )}
         </div>
+      </aside>
 
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>
-            Jobs by match score ({sortedJobs.length})
+      {/* Main content */}
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+          <h2 className="text-xl font-semibold">
+            {section === "jobs" && "Jobs"}
+            {section === "resumes" && "Resumes"}
           </h2>
-          <ul style={styles.list}>
-            {sortedJobs.map((j) => (
-              <JobMatchCard key={j.id} job={j} space={space} />
-            ))}
-          </ul>
-        </section>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden">
+          {/* Center content */}
+          <div className="flex-1 overflow-auto p-6">
+            {section === "jobs" && (
+              <JobsSection jobs={sortedJobs} space={space} />
+            )}
+            {section === "resumes" && (
+              <ResumesSection
+                resumeConfig={resumeConfig}
+                fileInputKey={fileInputKey}
+                onFileUpload={handleFileUpload}
+                onRestore={handleResumeRestore}
+                versionDetail={resumeVersionDetail}
+                setVersionDetail={setResumeVersionDetail}
+              />
+            )}
+          </div>
+
+          {/* Right LLM Log panel */}
+          <div className="flex w-80 flex-col border-l border-zinc-800 bg-zinc-900/30">
+            <button
+              onClick={() => setLogPanelOpen((o) => !o)}
+              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+            >
+              <span className="font-medium">
+                {matching ? "LLM working…" : "LLM log"}
+              </span>
+              {logPanelOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </button>
+            {logPanelOpen && (
+              <div className="flex-1 overflow-auto border-t border-zinc-800 p-3">
+                <div className="space-y-2">
+                  {logEntries.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                      Match jobs or upload a resume to see activity here.
+                    </p>
+                  ) : (
+                    logEntries.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className={`rounded px-2 py-1.5 text-xs ${
+                          entry.type === "error"
+                            ? "bg-red-500/10 text-red-400"
+                            : entry.type === "result"
+                              ? "bg-green-500/10 text-green-400"
+                              : "bg-zinc-800/50 text-zinc-400"
+                        }`}
+                      >
+                        <span className="text-zinc-500">
+                          {new Date(entry.timestamp).toLocaleTimeString()}{" "}
+                        </span>
+                        {entry.message}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </main>
+
+      {/* Resume version detail modal */}
+      {resumeVersionDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setResumeVersionDetail(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-zinc-900 p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-4 text-lg font-semibold">
+              Resume version {resumeVersionDetail.version}
+            </h3>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-sm text-zinc-300">
+              {resumeVersionDetail.text}
+            </pre>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-zinc-600 px-4 py-2 text-sm hover:bg-zinc-800"
+                onClick={() => setResumeVersionDetail(null)}
+              >
+                Close
+              </button>
+              <button
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                onClick={() => {
+                  handleResumeRestore(resumeVersionDetail);
+                }}
+              >
+                Restore
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function JobMatchCard({ job, space }: { job: RoolObject; space: RoolSpace | null }) {
+function JobsSection({
+  jobs,
+  space,
+}: {
+  jobs: RoolObject[];
+  space: RoolSpace | null;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-zinc-500">
+        Jobs sorted by match score. Upload a resume and run Match All to score.
+      </p>
+      <ul className="space-y-2">
+        {jobs.map((j) => (
+          <JobMatchCard key={j.id} job={j} space={space} />
+        ))}
+      </ul>
+      {jobs.length === 0 && (
+        <p className="py-8 text-center text-zinc-500">
+          No jobs yet. Harvest jobs in the Job Harvester app first.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function JobMatchCard({
+  job,
+  space,
+}: {
+  job: RoolObject;
+  space: RoolSpace | null;
+}) {
   const [keywords, setKeywords] = useState<RoolObject[]>([]);
   const [expanded, setExpanded] = useState(false);
 
@@ -242,50 +561,59 @@ function JobMatchCard({ job, space }: { job: RoolObject; space: RoolSpace | null
 
   const matchScore = Number(job.matchScore);
   const scoreColor =
-    matchScore >= 70 ? "#22c55e" : matchScore >= 50 ? "#eab308" : "#71717a";
+    matchScore >= 70
+      ? "text-green-500"
+      : matchScore >= 50
+        ? "text-yellow-500"
+        : "text-zinc-500";
 
   return (
-    <li style={styles.jobItem}>
-      <div style={styles.jobHeader}>
-        <div>
-          <strong>{String(job.title ?? "Unknown")}</strong>
-          <span style={styles.meta}>{String(job.companyName ?? "")}</span>
+    <li className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <strong className="text-zinc-200">{String(job.title ?? "Unknown")}</strong>
+          <p className="mt-1 text-sm text-zinc-500">
+            {String(job.companyName ?? "")}
+          </p>
+          {job.url && (
+            <a
+              href={String(job.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block text-sm text-blue-400 hover:underline"
+            >
+              Apply →
+            </a>
+          )}
         </div>
-        <div style={styles.scoreBadge}>
-          <span style={{ ...styles.score, color: scoreColor }}>
+        <div className="shrink-0">
+          <span
+            className={`text-lg font-semibold ${
+              Number.isNaN(matchScore) ? "text-zinc-500" : scoreColor
+            }`}
+          >
             {Number.isNaN(matchScore) ? "—" : `${matchScore}%`}
           </span>
         </div>
       </div>
-      {job.url && (
-        <a
-          href={String(job.url)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.link}
-        >
-          Apply
-        </a>
-      )}
       <button
-        style={styles.keywordsToggle}
         onClick={() => setExpanded((e) => !e)}
+        className="mt-3 text-sm text-zinc-500 hover:text-zinc-300"
       >
         {expanded ? "Hide" : "Show"} keywords
       </button>
       {expanded && keywords.length > 0 && (
-        <div style={styles.keywords}>
+        <div className="mt-3 flex flex-wrap gap-2">
           {keywords.map((k) => (
             <span
               key={k.id}
-              style={{
-                ...styles.keyword,
-                ...(k.priority === "high"
-                  ? styles.keywordHigh
+              className={`rounded px-2 py-1 text-xs ${
+                k.priority === "high"
+                  ? "bg-blue-600/30 text-blue-400"
                   : k.priority === "medium"
-                    ? styles.keywordMedium
-                    : styles.keywordLow),
-              }}
+                    ? "bg-zinc-600 text-zinc-300"
+                    : "bg-zinc-800 text-zinc-500"
+              }`}
             >
               {String(k.text)}
             </span>
@@ -296,88 +624,114 @@ function JobMatchCard({ job, space }: { job: RoolObject; space: RoolSpace | null
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  center: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100vh",
-    padding: 24,
-  },
-  card: {
-    background: "#18181b",
-    borderRadius: 12,
-    padding: 32,
-    maxWidth: 400,
-    textAlign: "center",
-  },
-  title: { margin: "0 0 8px", fontSize: 24 },
-  subtitle: { margin: "0 0 24px", color: "#a1a1aa", fontSize: 14 },
-  button: {
-    padding: "12px 24px",
-    fontSize: 16,
-    background: "#27272a",
-    color: "#e4e4e7",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  primaryButton: { background: "#3b82f6", color: "white" },
-  container: { maxWidth: 800, margin: "0 auto", padding: 24 },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 24,
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  logo: { margin: 0, fontSize: 24 },
-  uploadRow: { display: "flex", alignItems: "center", gap: 12 },
-  uploadLabel: {
-    padding: "8px 16px",
-    background: "#27272a",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: 14,
-  },
-  uploadStatus: { fontSize: 13, color: "#22c55e" },
-  main: {},
-  actions: { display: "flex", alignItems: "center", gap: 16, marginBottom: 24 },
-  progress: { fontSize: 14, color: "#a1a1aa" },
-  section: { background: "#18181b", borderRadius: 12, padding: 20 },
-  sectionTitle: { margin: "0 0 16px", fontSize: 18 },
-  list: { margin: 0, padding: 0, listStyle: "none" },
-  jobItem: {
-    padding: "16px 0",
-    borderBottom: "1px solid #27272a",
-  },
-  jobHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  meta: { display: "block", fontSize: 13, color: "#a1a1aa" },
-  scoreBadge: { flexShrink: 0 },
-  score: { fontSize: 18, fontWeight: 600 },
-  link: { color: "#3b82f6", fontSize: 13, display: "inline-block", marginTop: 8 },
-  keywordsToggle: {
-    marginTop: 8,
-    padding: "4px 0",
-    background: "none",
-    border: "none",
-    color: "#a1a1aa",
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  keywords: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
-  keyword: {
-    padding: "4px 10px",
-    borderRadius: 6,
-    fontSize: 12,
-  },
-  keywordHigh: { background: "#3b82f6", color: "white" },
-  keywordMedium: { background: "#6b7280", color: "white" },
-  keywordLow: { background: "#27272a", color: "#a1a1aa" },
-};
+function ResumesSection({
+  resumeConfig,
+  fileInputKey,
+  onFileUpload,
+  onRestore,
+  versionDetail,
+  setVersionDetail,
+}: {
+  resumeConfig: {
+    currentText: string;
+    currentVersion: number;
+    versionHistory: { version: number; text: string; createdAt: number }[];
+  } | null;
+  fileInputKey: number;
+  onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRestore: (v: { version: number; text: string }) => void;
+  versionDetail: { version: number; text: string } | null;
+  setVersionDetail: (v: { version: number; text: string } | null) => void;
+}) {
+  const text = resumeConfig?.currentText ?? "";
+  const version = resumeConfig?.currentVersion ?? 0;
+  const history = [...(resumeConfig?.versionHistory ?? [])].reverse();
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <h3 className="mb-2 text-sm font-medium text-zinc-400">
+          Current resume {version > 0 ? `(v${version})` : ""}
+        </h3>
+        {text ? (
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm text-zinc-300">
+            {text.slice(0, 400)}
+            {text.length > 400 ? "…" : ""}
+          </pre>
+        ) : (
+          <p className="text-sm text-zinc-500">No resume uploaded yet.</p>
+        )}
+        <label className="mt-3 inline-block cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">
+          <input
+            key={fileInputKey}
+            type="file"
+            accept=".pdf"
+            onChange={onFileUpload}
+            className="hidden"
+          />
+          Upload Resume (PDF)
+        </label>
+      </div>
+
+      {history.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-zinc-400">
+            Version history
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 bg-zinc-900/50">
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Version
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Content (truncated)
+                  </th>
+                  <th className="px-4 py-3 text-left font-medium text-zinc-400">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-zinc-400">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((v) => (
+                  <tr
+                    key={v.version}
+                    className="border-b border-zinc-800/50 last:border-0"
+                  >
+                    <td className="px-4 py-3 font-mono text-zinc-300">
+                      v{v.version}
+                    </td>
+                    <td className="max-w-md px-4 py-3">
+                      <button
+                        onClick={() => setVersionDetail(v)}
+                        className="text-left text-zinc-400 hover:text-blue-400 hover:underline"
+                      >
+                        {v.text.slice(0, 80)}
+                        {v.text.length > 80 ? "…" : ""}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-zinc-500">
+                      {new Date(v.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => onRestore(v)}
+                        className="text-blue-400 hover:text-blue-300"
+                      >
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
