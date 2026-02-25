@@ -330,7 +330,62 @@ export default function App() {
 
   const handleMatchAll = async () => {
     if (!space || !resumeConfig) return;
-    const resumeKeywords = getCurrentResumeKeywords(resumeConfig);
+    let resumeKeywords = getCurrentResumeKeywords(resumeConfig);
+    if (resumeKeywords.size === 0 && (resumeConfig.currentText?.length ?? 0) > 0) {
+      addLog("progress", "Resume exists but keywords missing. Extracting keywords…");
+      const resume = await space.getObject(RESUME_OBJECT_ID);
+      if (resume?.text) {
+        try {
+          const { message } = await space.prompt(EXTRACT_KEYWORDS_PROMPT, {
+            objectIds: [RESUME_OBJECT_ID],
+            effort: "REASONING",
+            responseSchema: {
+              type: "object",
+              properties: {
+                keywords: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Skills and technologies from the resume",
+                },
+              },
+              required: ["keywords"],
+            },
+          });
+          let keywords: string[] = [];
+          try {
+            const parsed = JSON.parse(message || "{}");
+            if (Array.isArray(parsed.keywords)) {
+              keywords = parsed.keywords.filter((k: unknown) => typeof k === "string");
+            }
+          } catch {
+            addLog("error", "Could not parse extracted keywords");
+          }
+          if (keywords.length > 0) {
+            const history = ensureVersionHistory(resumeConfig.versionHistory);
+            const entryIdx = history.findIndex((v) => v.version === resumeConfig.currentVersion);
+            if (entryIdx >= 0) {
+              history[entryIdx] = { ...history[entryIdx], keywords };
+            } else {
+              history.push({
+                version: resumeConfig.currentVersion,
+                text: resumeConfig.currentText,
+                createdAt: Date.now(),
+                keywords,
+              });
+            }
+            await space.updateObject(RESUME_CONFIG_ID, {
+              data: { versionHistory: history },
+              ephemeral: true,
+            });
+            setResumeConfig({ ...resumeConfig, versionHistory: history });
+            resumeKeywords = new Set(keywords.map((k) => String(k).toLowerCase().trim()).filter(Boolean));
+            addLog("result", `Extracted ${keywords.length} keywords from existing resume`);
+          }
+        } catch (err) {
+          addLog("error", err instanceof Error ? err.message : "Keyword extraction failed");
+        }
+      }
+    }
     if (resumeKeywords.size === 0) {
       addLog("error", "No resume keywords. Upload a resume first.");
       return;
@@ -563,6 +618,10 @@ export default function App() {
                     ? getCurrentResumeKeywords(resumeConfig)
                     : new Set<string>()
                 }
+                onMatch={handleMatchAll}
+                matching={matching}
+                hasResume={!!hasResume}
+                hasJobs={jobs.length > 0}
               />
             )}
             {section === "resumes" && (
@@ -788,25 +847,54 @@ function PieChart({
 function JobsSection({
   jobs,
   resumeKeywords,
+  onMatch,
+  matching,
+  hasResume,
+  hasJobs,
 }: {
   jobs: RoolObject[];
   resumeKeywords: Set<string>;
+  onMatch: () => void;
+  matching: boolean;
+  hasResume: boolean;
+  hasJobs: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Jobs sorted by match score. Upload a resume and run Match to score.
-      </p>
-      <ul className="space-y-2">
-        {jobs.map((j) => (
-          <JobMatchCard key={j.id} job={j} resumeKeywords={resumeKeywords} />
-        ))}
-      </ul>
-      {jobs.length === 0 && (
-        <p className="py-8 text-center text-zinc-500">
-          No jobs yet. Harvest jobs in the Job Harvester app first.
+    <div className="flex gap-6">
+      {/* Left pane: Run Match at bottom */}
+      <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <button
+            onClick={onMatch}
+            disabled={matching || !hasResume || !hasJobs}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {matching ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Matching…
+              </>
+            ) : (
+              "Run Match"
+            )}
+          </button>
+      </div>
+
+      {/* Right: job list */}
+      <div className="min-w-0 flex-1 space-y-4">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Jobs sorted by match score. Upload a resume and run Match to score.
         </p>
-      )}
+        <ul className="space-y-2">
+          {jobs.map((j) => (
+            <JobMatchCard key={j.id} job={j} resumeKeywords={resumeKeywords} />
+          ))}
+        </ul>
+        {jobs.length === 0 && (
+          <p className="py-8 text-center text-zinc-500">
+            No jobs yet. Harvest jobs in the Job Harvester app first.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

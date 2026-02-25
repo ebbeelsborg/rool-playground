@@ -13,7 +13,6 @@ import {
   ChevronRight,
   Loader2,
   CheckCircle2,
-  Ban,
   Sun,
   Moon,
   Monitor,
@@ -27,9 +26,13 @@ import {
   INITIAL_FILTER_RULES,
   DEFAULT_HARVEST_PROMPT,
 } from "./constants";
+import { passesJobFilter } from "./filters";
 import { Toaster } from "./Toaster";
 
 const SPACE_NAME = "Remote Job Harvest";
+const FILTERED_OUT_HISTORY_KEY = "job-harvester-filtered-out-history";
+const FILTERED_OUT_MAX_POINTS = 200;
+const FILTERED_OUT_RECORD_INTERVAL_MS = 5 * 60 * 1000; // 5 min min interval
 
 type JobStatus = "inbox" | "saved" | "discarded";
 type Bucket = "inbox" | "saved" | "discarded";
@@ -62,6 +65,12 @@ function ensureVersionHistory(
 
 function normalizeCompany(name: string): string {
   return String(name ?? "").trim().toLowerCase();
+}
+
+function displayCompanyName(name: string): string {
+  const s = String(name ?? "").trim();
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
 export default function App() {
@@ -558,7 +567,7 @@ export default function App() {
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "prompt" && "Prompts"}
-            {section === "companies" && "Company Lists"}
+            {section === "companies" && "Companies"}
             {section === "stats" && "Statistics"}
           </h2>
           <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
@@ -618,6 +627,8 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
+              onHarvest={handleHarvest}
+              harvesting={harvesting}
             />
           )}
           {section === "prompt" && (
@@ -847,6 +858,8 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
+  onHarvest,
+  harvesting,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -856,44 +869,64 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
+  onHarvest: () => void;
+  harvesting: boolean;
 }) {
   return (
     <div className="flex gap-6">
-      {/* Left pane: bucket filters */}
-      <div className="flex w-52 shrink-0 flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <button
-          onClick={() => setBucket("inbox")}
-          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            bucket === "inbox"
-              ? "bg-blue-600 text-white"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Inbox className="h-4 w-4 shrink-0" />
-          Inbox ({inboxCount})
-        </button>
-        <button
-          onClick={() => setBucket("saved")}
-          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            bucket === "saved"
-              ? "bg-blue-600 text-white"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Star className="h-4 w-4 shrink-0 fill-yellow-500 text-yellow-500" />
-          Saved ({savedCount})
-        </button>
-        <button
-          onClick={() => setBucket("discarded")}
-          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-            bucket === "discarded"
-              ? "bg-red-600/20 text-red-500 dark:text-red-400"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-          }`}
-        >
-          <EyeOff className="h-4 w-4 shrink-0" />
-          Ignored ({discardedCount})
-        </button>
+      {/* Left pane: bucket filters + Run Harvest at bottom */}
+      <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div>
+          <button
+            onClick={() => setBucket("inbox")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              bucket === "inbox"
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Inbox className="h-4 w-4 shrink-0" />
+            Inbox ({inboxCount})
+          </button>
+          <button
+            onClick={() => setBucket("saved")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              bucket === "saved"
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Star className="h-4 w-4 shrink-0 fill-yellow-500 text-yellow-500" />
+            Saved ({savedCount})
+          </button>
+          <button
+            onClick={() => setBucket("discarded")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              bucket === "discarded"
+                ? "bg-red-600/20 text-red-500 dark:text-red-400"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+            }`}
+          >
+            <EyeOff className="h-4 w-4 shrink-0" />
+            Ignored ({discardedCount})
+          </button>
+        </div>
+        <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700">
+          <button
+            onClick={onHarvest}
+            disabled={harvesting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {harvesting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Harvesting…
+              </>
+            ) : (
+              "Run Harvest"
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Right: job list */}
@@ -1024,6 +1057,126 @@ function PromptSection({
   );
 }
 
+const PER_PAGE = 25;
+
+function DiscoveredCompaniesList({
+  companies,
+  whitelist,
+  blacklist,
+  onAddToList,
+  onRemoveFromList,
+}: {
+  companies: RoolObject[];
+  whitelist: string[];
+  blacklist: string[];
+  onAddToList: (name: string, list: "blacklist" | "whitelist") => void;
+  onRemoveFromList: (name: string, list: "blacklist" | "whitelist") => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+
+  const filtered = companies
+    .filter((c) => {
+      const name = String(c.name ?? "").toLowerCase();
+      const q = searchQuery.trim().toLowerCase();
+      return !q || name.includes(q);
+    })
+    .sort((a, b) => {
+      const na = displayCompanyName(String(a.name ?? "")).toLowerCase();
+      const nb = displayCompanyName(String(b.name ?? "")).toLowerCase();
+      return na.localeCompare(nb);
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const start = currentPage * PER_PAGE;
+  const pageCompanies = filtered.slice(start, start + PER_PAGE);
+
+  return (
+    <div>
+      <input
+        type="text"
+        placeholder="Search companies…"
+        value={searchQuery}
+        onChange={(e) => {
+          setSearchQuery(e.target.value);
+          setPage(0);
+        }}
+        className="mb-3 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 placeholder-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:placeholder-zinc-500"
+      />
+      <ul className="flex flex-wrap gap-2">
+        {pageCompanies.map((c) => {
+          const name = String(c.name ?? "Unknown");
+          const normalized = normalizeCompany(name);
+          const inWhitelist = whitelist.includes(normalized);
+          const inBlacklist = blacklist.includes(normalized);
+          return (
+            <li
+              key={c.id}
+              className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50"
+            >
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">{displayCompanyName(name)}</span>
+              {inWhitelist ? (
+                <button
+                  onClick={() => onRemoveFromList(normalized, "whitelist")}
+                  className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                >
+                  ✓ Whitelist
+                </button>
+              ) : (
+                <button
+                  onClick={() => onAddToList(name, "whitelist")}
+                  className="text-xs text-zinc-500 hover:text-green-600 dark:hover:text-green-400"
+                >
+                  + Whitelist
+                </button>
+              )}
+              {inBlacklist ? (
+                <button
+                  onClick={() => onRemoveFromList(normalized, "blacklist")}
+                  className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                >
+                  ✓ Blacklist
+                </button>
+              ) : (
+                <button
+                  onClick={() => onAddToList(name, "blacklist")}
+                  className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
+                >
+                  + Blacklist
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between border-t border-zinc-200 pt-3 dark:border-zinc-700">
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            Page {currentPage + 1} of {totalPages} ({filtered.length} companies)
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={currentPage === 0}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={currentPage >= totalPages - 1}
+              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CompaniesSection({
   whitelist,
   blacklist,
@@ -1051,9 +1204,6 @@ function CompaniesSection({
         <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Whitelist ({whitelist.length}) – always harvest
         </h3>
-        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-500">
-          Stored lowercase, trimmed. LLM also discovers new companies.
-        </p>
         <div className="mb-3 flex gap-2">
           <input
             type="text"
@@ -1086,7 +1236,7 @@ function CompaniesSection({
               key={name}
               className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">{displayCompanyName(name)}</span>
               <button
                 onClick={() => onRemoveFromList(name, "whitelist")}
                 className="text-xs text-zinc-500 hover:text-red-500 dark:hover:text-red-400"
@@ -1102,9 +1252,6 @@ function CompaniesSection({
         <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Blacklist ({blacklist.length}) – never harvest
         </h3>
-        <p className="mb-3 text-xs text-zinc-500">
-          Stored lowercase, trimmed.
-        </p>
         <div className="mb-3 flex gap-2">
           <input
             type="text"
@@ -1137,7 +1284,7 @@ function CompaniesSection({
               key={name}
               className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
+              <span className="text-sm text-zinc-800 dark:text-zinc-200">{displayCompanyName(name)}</span>
               <button
                 onClick={() => onRemoveFromList(name, "blacklist")}
                 className="text-xs text-zinc-500 hover:text-red-500 dark:hover:text-red-400"
@@ -1157,55 +1304,137 @@ function CompaniesSection({
           <p className="mb-3 text-xs text-zinc-500">
             Quick-add to whitelist or blacklist
           </p>
-          <ul className="flex flex-wrap gap-2">
-            {companies.map((c) => {
-              const name = String(c.name ?? "Unknown");
-              const normalized = normalizeCompany(name);
-              const inWhitelist = whitelist.includes(normalized);
-              const inBlacklist = blacklist.includes(normalized);
-              return (
-                <li
-                  key={c.id}
-                  className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50"
-                >
-                  <span className="text-sm text-zinc-800 dark:text-zinc-200">{name}</span>
-                  {inWhitelist ? (
-                    <button
-                      onClick={() => onRemoveFromList(normalized, "whitelist")}
-                      className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                    >
-                      ✓ Whitelist
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => onAddToList(name, "whitelist")}
-                      className="text-xs text-zinc-500 hover:text-green-600 dark:hover:text-green-400"
-                    >
-                      + Whitelist
-                    </button>
-                  )}
-                  {inBlacklist ? (
-                    <button
-                      onClick={() => onRemoveFromList(normalized, "blacklist")}
-                      className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      ✓ Blacklist
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => onAddToList(name, "blacklist")}
-                      className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400"
-                    >
-                      + Blacklist
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <DiscoveredCompaniesList
+            companies={companies}
+            whitelist={whitelist}
+            blacklist={blacklist}
+            onAddToList={onAddToList}
+            onRemoveFromList={onRemoveFromList}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+function FilteredOutLineChart({
+  data,
+}: {
+  data: { t: number; c: number }[];
+}) {
+  if (data.length < 2) return null;
+  const width = 400;
+  const height = 120;
+  const padding = { top: 8, right: 8, bottom: 24, left: 36 };
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+
+  const minT = Math.min(...data.map((d) => d.t));
+  const maxT = Math.max(...data.map((d) => d.t));
+  const minC = Math.min(0, ...data.map((d) => d.c));
+  const maxC = Math.max(...data.map((d) => d.c), 1);
+  const rangeT = maxT - minT || 1;
+  const rangeC = maxC - minC || 1;
+
+  const points = data.map((d) => {
+    const x = padding.left + ((d.t - minT) / rangeT) * innerW;
+    const y = padding.top + innerH - ((d.c - minC) / rangeC) * innerH;
+    return `${x},${y}`;
+  });
+  const pathD = `M ${points.join(" L ")}`;
+
+  const yTicks = [minC, Math.round((minC + maxC) / 2), maxC].filter(
+    (v, i, a) => a.indexOf(v) === i
+  );
+
+  const formatTime = (ts: number) =>
+    new Date(ts).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  return (
+    <div>
+      <svg width={width} height={height} className="overflow-visible">
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#ef4444"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {yTicks.map((tick) => {
+        const y =
+          padding.top + innerH - ((tick - minC) / rangeC) * innerH;
+        return (
+          <g key={tick}>
+            <line
+              x1={padding.left}
+              y1={y}
+              x2={padding.left + innerW}
+              y2={y}
+              stroke="currentColor"
+              strokeOpacity={0.15}
+              strokeDasharray="2 2"
+            />
+            <text
+              x={padding.left - 6}
+              y={y + 4}
+              textAnchor="end"
+              className="fill-zinc-500 text-[10px] dark:fill-zinc-400"
+            >
+              {tick}
+            </text>
+          </g>
+        );
+      })}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-zinc-400 dark:text-zinc-500">
+        <span>{formatTime(minT)}</span>
+        <span>{formatTime(maxT)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PieChart({
+  data,
+  total,
+}: {
+  data: { label: string; count: number; color: string }[];
+  total: number;
+}) {
+  let startAngle = 0;
+  const size = 120;
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" className="shrink-0">
+      {data.map((d) => {
+        const pct = total > 0 ? d.count / total : 0;
+        const angle = pct * 360;
+        const endAngle = startAngle + angle;
+        const x1 = 50 + 50 * Math.cos((startAngle * Math.PI) / 180);
+        const y1 = 50 + 50 * Math.sin((startAngle * Math.PI) / 180);
+        const x2 = 50 + 50 * Math.cos((endAngle * Math.PI) / 180);
+        const y2 = 50 + 50 * Math.sin((endAngle * Math.PI) / 180);
+        const large = angle > 180 ? 1 : 0;
+        const path = `M 50 50 L ${x1} ${y1} A 50 50 0 ${large} 1 ${x2} ${y2} Z`;
+        startAngle = endAngle;
+        return (
+          <path
+            key={d.label}
+            d={path}
+            fill={d.color}
+            stroke="white"
+            strokeWidth={2}
+            className="dark:stroke-zinc-900"
+          />
+        );
+      })}
+    </svg>
   );
 }
 
@@ -1227,44 +1456,171 @@ function StatsSection({
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
   const discardedCount = jobs.filter((j) => getJobStatus(j) === "discarded").length;
+  const jobsTotal = inboxCount + savedCount + discardedCount;
+
+  const filteredOutCount = jobs.filter(
+    (j) =>
+      !passesJobFilter({
+        title: String(j.title ?? ""),
+        description: j.description as string | null | undefined,
+        level: j.level as string | null | undefined,
+        location: j.location as string | string[] | null | undefined,
+      })
+  ).length;
+
+  const [filteredOutHistory, setFilteredOutHistory] = useState<
+    { t: number; c: number }[]
+  >(() => {
+    try {
+      const raw = localStorage.getItem(FILTERED_OUT_HISTORY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter(
+              (x): x is { t: number; c: number } =>
+                typeof x === "object" &&
+                x !== null &&
+                typeof (x as { t?: unknown }).t === "number" &&
+                typeof (x as { c?: unknown }).c === "number"
+            )
+            .slice(-FILTERED_OUT_MAX_POINTS);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (jobs.length === 0) return;
+    const now = Date.now();
+    setFilteredOutHistory((prev) => {
+      const last = prev[prev.length - 1];
+      const shouldRecord =
+        !last ||
+        last.c !== filteredOutCount ||
+        now - last.t >= FILTERED_OUT_RECORD_INTERVAL_MS;
+      if (!shouldRecord) return prev;
+      const next = [...prev, { t: now, c: filteredOutCount }].slice(
+        -FILTERED_OUT_MAX_POINTS
+      );
+      try {
+        localStorage.setItem(FILTERED_OUT_HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, [jobs.length, filteredOutCount]);
+
+  const jobsPieData = [
+    { label: "Inbox", count: inboxCount, color: "#3b82f6" },
+    { label: "Saved", count: savedCount, color: "#eab308" },
+    { label: "Ignored", count: discardedCount, color: "#ef4444" },
+  ].filter((d) => d.count > 0);
+
+  const companiesPieData = [
+    { label: "Discovered companies", count: companies.length, color: "#3b82f6" },
+    { label: "Whitelisted", count: whitelist.length, color: "#22c55e" },
+    { label: "Blacklisted", count: blacklist.length, color: "#ef4444" },
+  ].filter((d) => d.count > 0);
+
+  const companiesPieTotal = companies.length + whitelist.length + blacklist.length;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Manual harvests</p>
-        <p className="text-2xl font-semibold">{manualHarvestCount}</p>
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Manual harvests</p>
+          <p className="text-2xl font-semibold">{manualHarvestCount}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Automatic harvests</p>
+          <p className="text-2xl font-semibold">{automaticHarvestCount}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Total jobs</p>
+          <p className="text-2xl font-semibold">{jobs.length}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Companies</p>
+          <p className="text-2xl font-semibold">{companies.length}</p>
+        </div>
       </div>
+
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Automatic harvests</p>
-        <p className="text-2xl font-semibold">{automaticHarvestCount}</p>
+        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+          Filtered out over time
+        </h3>
+        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-500">
+          Jobs that don&apos;t meet criteria (software engineer, senior/AI, fully
+          remote, no geo restrictions). Current: <strong>{filteredOutCount}</strong>
+        </p>
+        {filteredOutHistory.length >= 2 ? (
+          <FilteredOutLineChart data={filteredOutHistory} />
+        ) : (
+          <p className="py-6 text-center text-sm text-zinc-500">
+            Record a few data points by visiting this page when jobs are loaded.
+          </p>
+        )}
       </div>
+
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Total jobs</p>
-        <p className="text-2xl font-semibold">{jobs.length}</p>
+        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+          Jobs by status
+        </h3>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {jobsTotal > 0 && jobsPieData.length > 0 ? (
+            <>
+              <PieChart data={jobsPieData} total={jobsTotal} />
+              <ul className="flex flex-wrap gap-4">
+                {jobsPieData.map((d) => (
+                  <li key={d.label} className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: d.color }}
+                    />
+                    <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                      {d.label}: {d.count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">No jobs yet.</p>
+          )}
+        </div>
       </div>
+
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Inbox</p>
-        <p className="text-2xl font-semibold text-blue-400">{inboxCount}</p>
-      </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Saved</p>
-        <p className="text-2xl font-semibold text-yellow-500">{savedCount}</p>
-      </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Ignored</p>
-        <p className="text-2xl font-semibold text-red-400">{discardedCount}</p>
-      </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Companies</p>
-        <p className="text-2xl font-semibold">{companies.length}</p>
-      </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Whitelisted companies</p>
-        <p className="text-2xl font-semibold">{whitelist.length}</p>
-      </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">Blacklisted companies</p>
-        <p className="text-2xl font-semibold">{blacklist.length}</p>
+        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+          Companies by category
+        </h3>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {companiesPieTotal > 0 && companiesPieData.length > 0 ? (
+            <>
+              <PieChart data={companiesPieData} total={companiesPieTotal} />
+              <ul className="flex flex-wrap gap-4">
+                {companiesPieData.map((d) => (
+                  <li key={d.label} className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: d.color }}
+                    />
+                    <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                      {d.label}: {d.count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">No companies yet.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1359,7 +1715,7 @@ function JobCard({
                       setMenuOpen(false);
                     }}
                   >
-                    <Ban className="h-4 w-4 text-red-400" />
+                    <EyeOff className="h-4 w-4 text-red-400" />
                     Ignore
                   </button>
                 )}

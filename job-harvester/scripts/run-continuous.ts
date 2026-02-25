@@ -19,7 +19,7 @@ const SPACE_NAME = "Remote Job Harvest";
 const INITIAL_VISITED_DOMAINS = "{}";
 
 /** Minutes between harvest runs */
-const INTERVAL_MINUTES = 10;
+const INTERVAL_MINUTES = 60;
 
 async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
   const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
