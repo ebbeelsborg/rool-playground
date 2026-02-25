@@ -561,6 +561,15 @@ export default function App() {
     setBucket("discarded");
   };
 
+  const handleMoveToInbox = async (job: RoolObject) => {
+    if (!space) return;
+    await space.updateObject(job.id, {
+      data: { status: "inbox", discardReason: undefined },
+      ephemeral: true,
+    });
+    setBucket("inbox");
+  };
+
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
   const discardedCount = jobs.filter((j) => getJobStatus(j) === "discarded").length;
@@ -714,6 +723,7 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
+              onMoveToInbox={handleMoveToInbox}
             />
           )}
           {section === "prompt" && (
@@ -946,6 +956,7 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
+  onMoveToInbox,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -955,6 +966,7 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
+  onMoveToInbox: (j: RoolObject) => void;
 }) {
   return (
     <div className="flex gap-6">
@@ -1007,6 +1019,7 @@ function JobsSection({
             bucket={bucket}
             onSave={onSave}
             onDiscard={onDiscard}
+            onMoveToInbox={onMoveToInbox}
           />
         ))}
       </ul>
@@ -1782,11 +1795,13 @@ function JobCard({
   bucket,
   onSave,
   onDiscard,
+  onMoveToInbox,
 }: {
   job: RoolObject;
   bucket: Bucket;
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
+  onMoveToInbox: (j: RoolObject) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -1835,7 +1850,18 @@ function JobCard({
                 onClick={() => setMenuOpen(false)}
               />
               <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-                {bucket !== "saved" && (
+                {bucket === "discarded" ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    onClick={() => {
+                      onMoveToInbox(job);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <span>📥</span>
+                    Inbox
+                  </button>
+                ) : bucket !== "saved" && (
                   <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     onClick={() => {
