@@ -1295,8 +1295,6 @@ function JobCard({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const tags = getJobTags(job);
-  const displayTags = tags.slice(0, 8);
-  const hasMoreTags = tags.length > 8;
 
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:shadow-none">
@@ -1379,25 +1377,18 @@ function JobCard({
         <div className="mt-3">
           <span className="text-xs text-zinc-500 dark:text-zinc-400">Tags:</span>
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {displayTags.map((k, i) => (
+            {tags.map((k, i) => (
               <span
                 key={i}
                 className={`rounded px-2 py-0.5 text-xs ${
-                  k.priority === "high"
+                  k.priority === "required"
                     ? "bg-blue-100 text-blue-700 dark:bg-blue-600/20 dark:text-blue-400"
-                    : k.priority === "medium"
-                      ? "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700/20 dark:text-zinc-500"
+                    : "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
                 }`}
               >
                 {String(k.text)}
               </span>
             ))}
-            {hasMoreTags && (
-              <span className="rounded px-2 py-0.5 text-xs text-zinc-500">
-                +{tags.length - 8} more
-              </span>
-            )}
           </div>
         </div>
       )}

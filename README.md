@@ -18,8 +18,9 @@ Crawls **company careers pages** (not job portals) for remote software engineer 
 
 Consumes harvester data. Upload your resume (PDF), then:
 
-- **Match score** – LLM rates each job 0–100% vs your resume
-- **Keywords** – 10–25 keywords per job (technical + soft skills) with priority (high/medium/low)
+- **Match score** – Keyword overlap: % of job tags that appear in your resume
+- **Resume keywords** – Extracted when you upload; each version has its own keyword set
+- **Skills tooltip** – Hover over match % to see each job tag with ✓ (resume has it) or ✗ (resume doesn’t)
 
 ## Setup
 
@@ -65,7 +66,7 @@ Runs every 10 minutes. Each website is visited at most once per 24 hours (tracke
 **Harvester:**
 
 - **Company**: `type="company"`, `name`, `careersUrl`, `websiteUrl`
-- **Job**: `type="job"`, `title`, `description`, `url`, `level`, `companyName`, `keywords` (array of {text, priority}), `status` (inbox|saved|discarded), `discardReason`
+- **Job**: `type="job"`, `title`, `description`, `url`, `level`, `companyName`, `keywords` (array of {text, priority: "required"|"nice-to-have"}), `status` (inbox|saved|discarded), `discardReason`
 - **harvestKnowledge**: `type="harvestKnowledge"`, `rules`, `feedbackLog`, `visitedDomains` – grows from discard feedback
 - **companyBlacklist**: `type="companyBlacklist"`, `companies` (string[]) – never harvest from these
 - **companyWhitelist**: `type="companyWhitelist"`, `companies` (string[]) – always harvest from these; LLM also discovers new companies to expand the pool
@@ -74,7 +75,8 @@ Runs every 10 minutes. Each website is visited at most once per 24 hours (tracke
 **Matcher:**
 
 - **resume**: `type="resume"`, `text` – extracted from uploaded PDF
-- Jobs get `matchScore` (0–100) and `keywords` (array of {text, priority}) after matching
+- **resumeConfig**: `type="resumeConfig"`, `currentText`, `currentVersion`, `versionHistory` – each version has `keywords` (string[]) extracted when uploaded
+- Jobs keep their `keywords` from the harvester; matcher never modifies them. `matchScore` (0–100) is computed from keyword overlap.
 
 ## Publish
 

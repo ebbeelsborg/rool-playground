@@ -44,7 +44,7 @@ This ensures each website is crawled at most once per 24 hours. Focus on new com
 - Create **Company** objects: type="company", name, careersUrl, websiteUrl
 - Create **Job** objects: type="job", title, description (summary), url, level, companyName, keywords. Do NOT set status - new jobs go to inbox.
 - Link each Job to its Company: job --[belongsTo]--> company
-- For each Job, add a **keywords** field (array on the job object): [{text: string, priority: "high"|"medium"|"low"}, ...]. Extract 5-15 skills/techs. High = must-have, medium = important, low = nice-to-have.
+- For each Job, add a **keywords** field (array on the job object): [{text: string, priority: "required"|"nice-to-have"}, ...]. Extract ALL relevant skills and technologies for matching purposes (typically 10-30). Required = must-have for the role, nice-to-have = preferred but not essential.
 
 ## WORKFLOW
 

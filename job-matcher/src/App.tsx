@@ -1,20 +1,55 @@
 import { useEffect, useState } from "react";
 import { RoolClient, RoolSpace } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
-import { Briefcase, FileText, Loader2, ChevronDown, ChevronRight, Sun, Moon, Monitor } from "lucide-react";
+import { Briefcase, FileText, BarChart3, Loader2, ChevronDown, ChevronRight, Sun, Moon, Monitor, Check, XCircle } from "lucide-react";
 import { extractTextFromPdf } from "./pdfUtils";
 
 const SPACE_NAME = "Remote Job Harvest";
 const RESUME_OBJECT_ID = "job-matcher-resume";
 const RESUME_CONFIG_ID = "job-matcher-resume-config";
+const MATCHER_STATS_ID = "job-matcher-stats";
+const HARVEST_KNOWLEDGE_ID = "harvest-knowledge";
 
-const MATCH_PROMPT = `You have a resume and a job listing. Rate how well the resume matches the job from 0-100 (percentage). Consider: relevant experience, skills overlap, seniority fit, and domain alignment. Be strict - only high matches get 70+.
+const EXTRACT_KEYWORDS_PROMPT = `Extract all skills and technologies from the resume object. Return a JSON object with a "keywords" array of strings. Include: programming languages, frameworks, tools, methodologies, and relevant technical terms. Normalize variations (e.g. "React" not "React.js").`;
 
-Update the job object with:
-1) matchScore: the match percentage (0-100)
-2) keywords: array of {text: string, priority: "high"|"medium"|"low"} - extract 10-25 skills/techs from the job. High = must-have, medium = important, low = nice-to-have.`;
+type Section = "jobs" | "resumes" | "stats";
 
-type Section = "jobs" | "resumes";
+type JobTag = { text: string; priority?: string };
+
+type ResumeVersion = {
+  version: number;
+  text: string;
+  createdAt: number;
+  keywords?: string[];
+};
+
+function getJobTags(job: RoolObject): JobTag[] {
+  const kw = job.keywords;
+  if (!Array.isArray(kw)) return [];
+  return kw.filter(
+    (x): x is JobTag =>
+      typeof x === "object" && x !== null && typeof (x as JobTag).text === "string"
+  );
+}
+
+function getCurrentResumeKeywords(config: {
+  currentVersion: number;
+  versionHistory: ResumeVersion[];
+}): Set<string> {
+  const entry = config.versionHistory.find((v) => v.version === config.currentVersion);
+  const kw = entry?.keywords ?? [];
+  return new Set(kw.map((k) => String(k).toLowerCase().trim()).filter(Boolean));
+}
+
+function computeMatchScore(tags: JobTag[], resumeKeywords: Set<string>): number {
+  if (tags.length === 0) return 0;
+  let matched = 0;
+  for (const tag of tags) {
+    const normalized = String(tag.text).toLowerCase().trim();
+    if (resumeKeywords.has(normalized)) matched++;
+  }
+  return Math.round((matched / tags.length) * 100);
+}
 
 type LogEntry = {
   id: string;
@@ -23,14 +58,10 @@ type LogEntry = {
   message: string;
 };
 
-function ensureVersionHistory(
-  v: unknown
-): { version: number; text: string; createdAt: number }[] {
+function ensureVersionHistory(v: unknown): ResumeVersion[] {
   if (!Array.isArray(v)) return [];
   return v.filter(
-    (
-      x
-    ): x is { version: number; text: string; createdAt: number } =>
+    (x): x is ResumeVersion =>
       typeof x === "object" &&
       x !== null &&
       typeof (x as { version?: unknown }).version === "number"
@@ -48,7 +79,7 @@ export default function App() {
   const [resumeConfig, setResumeConfig] = useState<{
     currentText: string;
     currentVersion: number;
-    versionHistory: { version: number; text: string; createdAt: number }[];
+    versionHistory: ResumeVersion[];
   } | null>(null);
   const [matching, setMatching] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
@@ -57,11 +88,14 @@ export default function App() {
   const [resumeVersionDetail, setResumeVersionDetail] = useState<{
     version: number;
     text: string;
+    keywords?: string[];
   } | null>(null);
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
     const s = localStorage.getItem("job-matcher-theme");
     return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
   });
+  const [uniqueDomains, setUniqueDomains] = useState(0);
+  const [matchesRun, setMatchesRun] = useState(0);
 
   const addLog = (type: LogEntry["type"], message: string) => {
     setLogEntries((prev) => [
@@ -135,7 +169,7 @@ export default function App() {
               currentText: existingText,
               currentVersion: hasExisting ? 1 : 0,
               versionHistory: hasExisting
-                ? [{ version: 1, text: existingText, createdAt: Date.now() }]
+                ? [{ version: 1, text: existingText, createdAt: Date.now(), keywords: [] }]
                 : [],
             },
           });
@@ -143,10 +177,26 @@ export default function App() {
       };
       await ensureResumeConfig();
 
+      const ensureMatcherStats = async () => {
+        const stats = await s.getObject(MATCHER_STATS_ID);
+        if (!stats) {
+          await s.createObject({
+            data: {
+              id: MATCHER_STATS_ID,
+              type: "matcherStats",
+              matchRunCount: 0,
+            },
+          });
+        }
+      };
+      await ensureMatcherStats();
+
       const refresh = async () => {
-        const [jobRes, cfgRes] = await Promise.all([
+        const [jobRes, cfgRes, knowledgeRes, statsRes] = await Promise.all([
           s.findObjects({ where: { type: "job" }, limit: 200 }),
           s.getObject(RESUME_CONFIG_ID),
+          s.getObject(HARVEST_KNOWLEDGE_ID),
+          s.getObject(MATCHER_STATS_ID),
         ]);
         if (mounted) {
           setJobs(jobRes.objects);
@@ -158,6 +208,19 @@ export default function App() {
               versionHistory: ensureVersionHistory(cfg.versionHistory),
             });
           }
+          try {
+            const vd = knowledgeRes?.visitedDomains;
+            const domains =
+              typeof vd === "string"
+                ? Object.keys(JSON.parse(vd || "{}"))
+                : typeof vd === "object" && vd !== null
+                  ? Object.keys(vd)
+                  : [];
+            setUniqueDomains(domains.length);
+          } catch {
+            setUniqueDomains(0);
+          }
+          setMatchesRun(Number(statsRes?.matchRunCount ?? 0));
         }
       };
       const onObjectChange = () => refresh();
@@ -190,15 +253,6 @@ export default function App() {
       const text = await extractTextFromPdf(file);
       addLog("progress", `Resume extracted: ${text.length} characters`);
 
-      const cfg = await space.getObject(RESUME_CONFIG_ID);
-      const currentVersion = Number(cfg?.currentVersion ?? 0);
-      const history = ensureVersionHistory(cfg?.versionHistory ?? []);
-      const newVersion = currentVersion + 1;
-      const newHistory = [
-        ...history,
-        { version: newVersion, text, createdAt: Date.now() },
-      ];
-
       const existingResume = await space.getObject(RESUME_OBJECT_ID);
       if (existingResume) {
         await space.updateObject(RESUME_OBJECT_ID, {
@@ -216,6 +270,43 @@ export default function App() {
         });
       }
 
+      addLog("progress", "Extracting keywords from resume…");
+      const { message } = await space.prompt(EXTRACT_KEYWORDS_PROMPT, {
+        objectIds: [RESUME_OBJECT_ID],
+        effort: "REASONING",
+        responseSchema: {
+          type: "object",
+          properties: {
+            keywords: {
+              type: "array",
+              items: { type: "string" },
+              description: "Skills and technologies from the resume",
+            },
+          },
+          required: ["keywords"],
+        },
+      });
+
+      let keywords: string[] = [];
+      try {
+        const parsed = JSON.parse(message || "{}");
+        if (Array.isArray(parsed.keywords)) {
+          keywords = parsed.keywords.filter((k: unknown) => typeof k === "string");
+        }
+      } catch {
+        addLog("error", "Could not parse extracted keywords");
+      }
+      addLog("result", `Extracted ${keywords.length} keywords`);
+
+      const cfg = await space.getObject(RESUME_CONFIG_ID);
+      const currentVersion = Number(cfg?.currentVersion ?? 0);
+      const history = ensureVersionHistory(cfg?.versionHistory ?? []);
+      const newVersion = currentVersion + 1;
+      const newHistory: ResumeVersion[] = [
+        ...history,
+        { version: newVersion, text, createdAt: Date.now(), keywords },
+      ];
+
       await space.updateObject(RESUME_CONFIG_ID, {
         data: {
           currentText: text,
@@ -230,7 +321,7 @@ export default function App() {
         currentVersion: newVersion,
         versionHistory: newHistory,
       });
-      addLog("result", `Resume v${newVersion} saved`);
+      addLog("result", `Resume v${newVersion} saved with ${keywords.length} keywords`);
     } catch (err) {
       addLog("error", err instanceof Error ? err.message : "Upload failed");
     }
@@ -238,7 +329,12 @@ export default function App() {
   };
 
   const handleMatchAll = async () => {
-    if (!space || !resumeConfig?.currentText) return;
+    if (!space || !resumeConfig) return;
+    const resumeKeywords = getCurrentResumeKeywords(resumeConfig);
+    if (resumeKeywords.size === 0) {
+      addLog("error", "No resume keywords. Upload a resume first.");
+      return;
+    }
     const jobsToMatch = jobs.filter((j) => j.status !== "discarded");
     if (jobsToMatch.length === 0) {
       addLog("error", "No jobs to match");
@@ -246,44 +342,27 @@ export default function App() {
     }
 
     setMatching(true);
-    addLog("progress", `Starting match for ${jobsToMatch.length} jobs`);
+    addLog("progress", `Matching ${jobsToMatch.length} jobs by keyword overlap`);
 
     for (let i = 0; i < jobsToMatch.length; i++) {
       const job = jobsToMatch[i];
       const jobTitle = String(job.title ?? "Unknown");
-      addLog("progress", `Matching ${i + 1}/${jobsToMatch.length}: ${jobTitle}`);
-
-      try {
-        const { message } = await space.prompt(MATCH_PROMPT, {
-          objectIds: [job.id, RESUME_OBJECT_ID],
-          effort: "REASONING",
-          responseSchema: {
-            type: "object",
-            properties: {
-              match: { type: "number", description: "Match percentage 0-100" },
-            },
-            required: ["match"],
-          },
-        });
-
-        const parsed = JSON.parse(message || "{}");
-        const match = typeof parsed.match === "number" ? parsed.match : 0;
-        await space.updateObject(job.id, {
-          data: { matchScore: match },
-          ephemeral: true,
-        });
-
-        addLog(
-          "result",
-          `${jobTitle}: ${match}% match`
-        );
-      } catch (err) {
-        addLog(
-          "error",
-          `${jobTitle}: ${err instanceof Error ? err.message : "Match failed"}`
-        );
-      }
+      const tags = getJobTags(job);
+      const matchScore = computeMatchScore(tags, resumeKeywords);
+      await space.updateObject(job.id, {
+        data: { matchScore },
+        ephemeral: true,
+      });
+      addLog("result", `${jobTitle}: ${matchScore}% match`);
     }
+
+    const stats = await space.getObject(MATCHER_STATS_ID);
+    const count = Number(stats?.matchRunCount ?? 0) + 1;
+    await space.updateObject(MATCHER_STATS_ID, {
+      data: { matchRunCount: count },
+      ephemeral: true,
+    });
+    setMatchesRun(count);
 
     addLog("result", `Match complete for ${jobsToMatch.length} jobs`);
     setMatching(false);
@@ -372,6 +451,7 @@ export default function App() {
   const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
     { id: "jobs", label: "Jobs", icon: Briefcase },
     { id: "resumes", label: "Resumes", icon: FileText },
+    { id: "stats", label: "Stats", icon: BarChart3 },
   ];
 
   return (
@@ -412,7 +492,7 @@ export default function App() {
                 Matching…
               </>
             ) : (
-              "Match All Jobs"
+              "Run Match"
             )}
           </button>
         </div>
@@ -421,26 +501,11 @@ export default function App() {
       {/* Main content */}
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-          <div className="flex items-center gap-4">
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "resumes" && "Resumes"}
+            {section === "stats" && "Statistics"}
           </h2>
-          <button
-            onClick={handleMatchAll}
-            disabled={matching || !hasResume || jobs.filter((j) => j.status !== "discarded").length === 0}
-            className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {matching ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Matching…
-              </>
-            ) : (
-              "Match All Jobs"
-            )}
-          </button>
-          </div>
           <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
             <button
               onClick={() => {
@@ -490,16 +555,32 @@ export default function App() {
         <div className="flex flex-1 overflow-hidden">
           {/* Center content */}
           <div className="flex-1 overflow-auto p-6">
-            {section === "jobs" && <JobsSection jobs={sortedJobs} />}
+            {section === "jobs" && (
+              <JobsSection
+                jobs={sortedJobs}
+                resumeKeywords={
+                  resumeConfig
+                    ? getCurrentResumeKeywords(resumeConfig)
+                    : new Set<string>()
+                }
+              />
+            )}
             {section === "resumes" && (
               <ResumesSection
                 resumeConfig={resumeConfig}
                 fileInputKey={fileInputKey}
                 onFileUpload={handleFileUpload}
-              onRestore={handleResumeRestore}
-              versionDetail={resumeVersionDetail}
-              setVersionDetail={setResumeVersionDetail}
-            />
+                onRestore={handleResumeRestore}
+                versionDetail={resumeVersionDetail}
+                setVersionDetail={setResumeVersionDetail}
+              />
+            )}
+            {section === "stats" && (
+              <StatsSection
+                jobs={jobs}
+                uniqueDomains={uniqueDomains}
+                matchesRun={matchesRun}
+              />
             )}
           </div>
 
@@ -590,15 +671,135 @@ export default function App() {
   );
 }
 
-function JobsSection({ jobs }: { jobs: RoolObject[] }) {
+function getJobStatus(job: RoolObject): "inbox" | "saved" | "discarded" {
+  const s = job.status as string | undefined;
+  if (s === "saved" || s === "discarded") return s;
+  return "inbox";
+}
+
+function StatsSection({
+  jobs,
+  uniqueDomains,
+  matchesRun,
+}: {
+  jobs: RoolObject[];
+  uniqueDomains: number;
+  matchesRun: number;
+}) {
+  const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
+  const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
+  const discardedCount = jobs.filter((j) => getJobStatus(j) === "discarded").length;
+  const total = inboxCount + savedCount + discardedCount;
+
+  const pieData = [
+    { label: "Inbox", count: inboxCount, color: "#3b82f6" },
+    { label: "Saved", count: savedCount, color: "#eab308" },
+    { label: "Ignored", count: discardedCount, color: "#ef4444" },
+  ].filter((d) => d.count > 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Unique web pages queried
+          </p>
+          <p className="text-2xl font-semibold">{uniqueDomains}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Jobs fetched</p>
+          <p className="text-2xl font-semibold">{jobs.length}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Matches run</p>
+          <p className="text-2xl font-semibold">{matchesRun}</p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+          Jobs by status
+        </h3>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {total > 0 && pieData.length > 0 ? (
+            <>
+              <PieChart data={pieData} total={total} />
+              <ul className="flex flex-wrap gap-4">
+                {pieData.map((d) => (
+                  <li key={d.label} className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: d.color }}
+                    />
+                    <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                      {d.label}: {d.count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">No jobs yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PieChart({
+  data,
+  total,
+}: {
+  data: { label: string; count: number; color: string }[];
+  total: number;
+}) {
+  let startAngle = 0;
+  const size = 120;
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" className="shrink-0">
+      {data.map((d) => {
+        const pct = d.count / total;
+        const angle = pct * 360;
+        const endAngle = startAngle + angle;
+        const x1 = 50 + 50 * Math.cos((startAngle * Math.PI) / 180);
+        const y1 = 50 + 50 * Math.sin((startAngle * Math.PI) / 180);
+        const x2 = 50 + 50 * Math.cos((endAngle * Math.PI) / 180);
+        const y2 = 50 + 50 * Math.sin((endAngle * Math.PI) / 180);
+        const large = angle > 180 ? 1 : 0;
+        const path = `M 50 50 L ${x1} ${y1} A 50 50 0 ${large} 1 ${x2} ${y2} Z`;
+        startAngle = endAngle;
+        return (
+          <path
+            key={d.label}
+            d={path}
+            fill={d.color}
+            stroke="white"
+            strokeWidth={2}
+            className="dark:stroke-zinc-900"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function JobsSection({
+  jobs,
+  resumeKeywords,
+}: {
+  jobs: RoolObject[];
+  resumeKeywords: Set<string>;
+}) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Jobs sorted by match score. Upload a resume and run Match All to score.
+        Jobs sorted by match score. Upload a resume and run Match to score.
       </p>
       <ul className="space-y-2">
         {jobs.map((j) => (
-          <JobMatchCard key={j.id} job={j} />
+          <JobMatchCard key={j.id} job={j} resumeKeywords={resumeKeywords} />
         ))}
       </ul>
       {jobs.length === 0 && (
@@ -610,18 +811,13 @@ function JobsSection({ jobs }: { jobs: RoolObject[] }) {
   );
 }
 
-type JobTag = { text: string; priority?: string };
-
-function getJobTags(job: RoolObject): JobTag[] {
-  const kw = job.keywords;
-  if (!Array.isArray(kw)) return [];
-  return kw.filter(
-    (x): x is JobTag =>
-      typeof x === "object" && x !== null && typeof (x as JobTag).text === "string"
-  );
-}
-
-function JobMatchCard({ job }: { job: RoolObject }) {
+function JobMatchCard({
+  job,
+  resumeKeywords,
+}: {
+  job: RoolObject;
+  resumeKeywords: Set<string>;
+}) {
   const tags = getJobTags(job);
   const matchScore = Number(job.matchScore);
   const scoreColor =
@@ -650,14 +846,42 @@ function JobMatchCard({ job }: { job: RoolObject }) {
             </a>
           )}
         </div>
-        <div className="shrink-0">
+        <div className="relative shrink-0 group">
           <span
-            className={`text-lg font-semibold ${
+            className={`text-lg font-semibold cursor-help ${
               Number.isNaN(matchScore) ? "text-zinc-500" : scoreColor
             }`}
           >
             {Number.isNaN(matchScore) ? "—" : `${matchScore}%`}
           </span>
+          {tags.length > 0 && (
+            <div className="absolute right-0 top-full z-10 mt-1 hidden max-h-60 min-w-[200px] overflow-auto rounded-lg border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 group-hover:block">
+              <p className="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                Skills match
+              </p>
+              <ul className="space-y-1.5 text-sm">
+                {tags.map((k, i) => {
+                  const normalized = String(k.text).toLowerCase().trim();
+                  const matched = resumeKeywords.has(normalized);
+                  return (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="text-zinc-700 dark:text-zinc-300">
+                        {String(k.text)}
+                      </span>
+                      {matched ? (
+                        <Check className="h-4 w-4 shrink-0 text-green-500" />
+                      ) : (
+                        <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
       {tags.length > 0 && (
@@ -668,11 +892,9 @@ function JobMatchCard({ job }: { job: RoolObject }) {
               <span
                 key={i}
                 className={`rounded px-2 py-0.5 text-xs ${
-                  k.priority === "high"
+                  k.priority === "required"
                     ? "bg-blue-100 text-blue-700 dark:bg-blue-600/20 dark:text-blue-400"
-                    : k.priority === "medium"
-                      ? "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
-                      : "bg-zinc-100 text-zinc-600 dark:bg-zinc-700/20 dark:text-zinc-500"
+                    : "bg-zinc-200 text-zinc-700 dark:bg-zinc-600/20 dark:text-zinc-400"
                 }`}
               >
                 {String(k.text)}
