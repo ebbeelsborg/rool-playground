@@ -31,6 +31,8 @@ async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
         rules: INITIAL_FILTER_RULES,
         feedbackLog: "",
         visitedDomains: INITIAL_VISITED_DOMAINS,
+        manualHarvestCount: 0,
+        automaticHarvestCount: 0,
       },
     });
   } else if (knowledge.visitedDomains == null || knowledge.visitedDomains === undefined) {
@@ -59,6 +61,14 @@ async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
   const { message, objects } = await space.prompt(promptText, {
     effort: "REASONING",
   });
+
+  const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+  const count = Number(knowledge?.automaticHarvestCount ?? 0) + 1;
+  await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+    data: { automaticHarvestCount: count },
+    ephemeral: true,
+  });
+
   return { message, objects };
 }
 
