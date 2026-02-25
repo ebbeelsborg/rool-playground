@@ -120,7 +120,7 @@ export default function App() {
     return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
   });
   const [auditEntries, setAuditEntries] = useState<
-    { timestamp: number; jobId: string; jobTitle: string; reason: string }[]
+    { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string }[]
   >([]);
 
   useEffect(() => {
@@ -271,7 +271,7 @@ export default function App() {
             setAuditEntries(
               entries
                 .filter(
-                  (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string } =>
+                  (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string } =>
                     typeof e === "object" &&
                     e !== null &&
                     typeof (e as { timestamp?: unknown }).timestamp === "number" &&
@@ -279,7 +279,6 @@ export default function App() {
                     typeof (e as { jobTitle?: unknown }).jobTitle === "string" &&
                     typeof (e as { reason?: unknown }).reason === "string"
                 )
-                .slice(-500)
             );
           }
         }
@@ -309,7 +308,7 @@ export default function App() {
 
   useEffect(() => {
     if (!space || jobs.length === 0) return;
-    const toLog: { timestamp: number; jobId: string; jobTitle: string; reason: string }[] = [];
+    const toLog: { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string }[] = [];
     for (const j of jobs) {
       const reason = getFilterFailureReason({
         title: String(j.title ?? ""),
@@ -323,6 +322,7 @@ export default function App() {
           jobId: j.id,
           jobTitle: String(j.title ?? "Unknown"),
           reason,
+          url: typeof j.url === "string" ? j.url : undefined,
         });
         loggedFilteredJobIds.current.add(j.id);
       }
@@ -332,22 +332,22 @@ export default function App() {
       try {
         const audit = await space.getObject(AUDIT_LOG_ID);
         const current = Array.isArray(audit?.entries) ? audit.entries : [];
-        const next = [...current, ...toLog].slice(-500);
+        const next = [...current, ...toLog];
         await space.updateObject(AUDIT_LOG_ID, {
           data: { entries: next },
         });
-        setAuditEntries(
-          next
-            .filter(
-              (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string } =>
-                typeof e === "object" &&
-                e !== null &&
-                typeof (e as { timestamp?: unknown }).timestamp === "number" &&
-                typeof (e as { jobId?: unknown }).jobId === "string" &&
-                typeof (e as { jobTitle?: unknown }).jobTitle === "string" &&
-                typeof (e as { reason?: unknown }).reason === "string"
-            )
-        );
+            setAuditEntries(
+              next
+                .filter(
+                  (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string } =>
+                    typeof e === "object" &&
+                    e !== null &&
+                    typeof (e as { timestamp?: unknown }).timestamp === "number" &&
+                    typeof (e as { jobId?: unknown }).jobId === "string" &&
+                    typeof (e as { jobTitle?: unknown }).jobTitle === "string" &&
+                    typeof (e as { reason?: unknown }).reason === "string"
+                )
+            );
       } catch {
         /* ignore */
       }
@@ -604,10 +604,10 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
-        <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* Sidebar - fixed, full height, no scroll */}
+      <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="flex h-14 shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
           <h1 className="text-lg font-semibold">Job Harvester</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2">
@@ -629,29 +629,27 @@ export default function App() {
             );
           })}
         </nav>
-        {(section === "jobs" || section === "stats") && (
-          <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
-            <button
-              onClick={handleHarvest}
-              disabled={harvesting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {harvesting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Harvesting…
-                </>
-              ) : (
-                "Run Harvest"
-              )}
-            </button>
-          </div>
-        )}
+        <div className="shrink-0 border-t border-zinc-200 p-2 dark:border-zinc-800">
+          <button
+            onClick={handleHarvest}
+            disabled={harvesting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {harvesting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Harvesting…
+              </>
+            ) : (
+              "Run Harvest"
+            )}
+          </button>
+        </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+      {/* Main content - scrolls independently */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6 dark:border-zinc-800">
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "prompt" && "Prompts"}
@@ -705,7 +703,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex flex-1 flex-col overflow-auto p-6">
+        <div className="min-h-0 flex-1 overflow-auto p-6">
           {section === "jobs" && (
             <JobsSection
               bucket={bucket}
@@ -750,8 +748,6 @@ export default function App() {
               blacklist={blacklist}
               manualHarvestCount={manualHarvestCount}
               automaticHarvestCount={automaticHarvestCount}
-              onHarvest={handleHarvest}
-              harvesting={harvesting}
             />
           )}
           {section === "audit" && (
@@ -760,7 +756,7 @@ export default function App() {
         </div>
 
         {/* LLM Output panel */}
-        <div className="border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="shrink-0 border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
           <button
             onClick={() => setLlmPanelOpen((o) => !o)}
             className="flex w-full items-center justify-between px-6 py-3 text-left text-sm text-zinc-500 hover:bg-zinc-300/50 dark:text-zinc-400 dark:hover:bg-zinc-800/50 dark:hover:text-zinc-200"
@@ -1517,8 +1513,6 @@ function StatsSection({
   blacklist,
   manualHarvestCount,
   automaticHarvestCount,
-  onHarvest,
-  harvesting,
 }: {
   jobs: RoolObject[];
   companies: RoolObject[];
@@ -1526,8 +1520,6 @@ function StatsSection({
   blacklist: string[];
   manualHarvestCount: number;
   automaticHarvestCount: number;
-  onHarvest: () => void;
-  harvesting: boolean;
 }) {
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
@@ -1606,27 +1598,7 @@ function StatsSection({
   const companiesPieTotal = companies.length + whitelist.length + blacklist.length;
 
   return (
-    <div className="flex gap-6">
-      {/* Left pane: Run Harvest at bottom */}
-      <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <button
-          onClick={onHarvest}
-          disabled={harvesting}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {harvesting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Harvesting…
-            </>
-          ) : (
-            "Run Harvest"
-          )}
-        </button>
-      </div>
-
-      {/* Right: stats content */}
-      <div className="min-w-0 flex-1 space-y-4">
+    <div className="space-y-4">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
           <p className="text-xs text-zinc-500 dark:text-zinc-400">Manual harvests</p>
@@ -1717,7 +1689,6 @@ function StatsSection({
           )}
         </div>
       </div>
-      </div>
     </div>
   );
 }
@@ -1725,19 +1696,25 @@ function StatsSection({
 function AuditLogSection({
   auditEntries,
 }: {
-  auditEntries: { timestamp: number; jobId: string; jobTitle: string; reason: string }[];
+  auditEntries: { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string }[];
 }) {
   const sorted = [...auditEntries].sort((a, b) => b.timestamp - a.timestamp);
   return (
-    <div className="overflow-auto">
+    <div className="min-h-0 flex-1 overflow-auto">
       <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-900/95">
+          <tr className="border-b border-zinc-200 dark:border-zinc-800">
             <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
               Time
             </th>
             <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
+              Job ID
+            </th>
+            <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
               Job
+            </th>
+            <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
+              URL
             </th>
             <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
               Reason
@@ -1753,8 +1730,25 @@ function AuditLogSection({
               <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
                 {new Date(e.timestamp).toLocaleString()}
               </td>
+              <td className="px-4 py-2 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+                {e.jobId}
+              </td>
               <td className="px-4 py-2 text-zinc-800 dark:text-zinc-200">
                 {e.jobTitle}
+              </td>
+              <td className="px-4 py-2">
+                {e.url ? (
+                  <a
+                    href={e.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    View
+                  </a>
+                ) : (
+                  <span className="text-zinc-400">—</span>
+                )}
               </td>
               <td className="px-4 py-2 text-zinc-600 dark:text-zinc-300">
                 {e.reason}

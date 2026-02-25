@@ -494,10 +494,10 @@ export default function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Left Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
-        <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* Left Sidebar - fixed, full height, Run Match always visible at bottom */}
+      <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="flex h-14 shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
           <h1 className="text-lg font-semibold">Job Matcher</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2">
@@ -519,7 +519,7 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
+        <div className="shrink-0 border-t border-zinc-200 p-2 dark:border-zinc-800">
           <button
             onClick={handleMatchAll}
             disabled={matching || !hasResume || jobs.length === 0}
@@ -537,9 +537,9 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+      {/* Main content - scrolls independently */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6 dark:border-zinc-800">
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             {section === "jobs" && "Jobs"}
             {section === "resumes" && "Resumes"}
@@ -591,9 +591,9 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* Center content */}
-          <div className="flex-1 overflow-auto p-6">
+          <div className="min-h-0 flex-1 overflow-auto p-6">
             {section === "jobs" && (
               <JobsSection
                 jobs={sortedJobs}
@@ -602,10 +602,6 @@ export default function App() {
                     ? getCurrentResumeKeywords(resumeConfig)
                     : new Set<string>()
                 }
-                onMatch={handleMatchAll}
-                matching={matching}
-                hasResume={!!hasResume}
-                hasJobs={jobs.length > 0}
               />
             )}
             {section === "resumes" && (
@@ -819,40 +815,12 @@ function PieChart({
 function JobsSection({
   jobs,
   resumeKeywords,
-  onMatch,
-  matching,
-  hasResume,
-  hasJobs,
 }: {
   jobs: RoolObject[];
   resumeKeywords: Set<string>;
-  onMatch: () => void;
-  matching: boolean;
-  hasResume: boolean;
-  hasJobs: boolean;
 }) {
   return (
-    <div className="flex gap-6">
-      {/* Left pane: Run Match at bottom */}
-      <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <button
-            onClick={onMatch}
-            disabled={matching || !hasResume || !hasJobs}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {matching ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Matching…
-              </>
-            ) : (
-              "Run Match"
-            )}
-          </button>
-      </div>
-
-      {/* Right: job list */}
-      <div className="min-w-0 flex-1 space-y-4">
+    <div className="space-y-4">
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Jobs sorted by match score. Upload a resume and run Match to score.
         </p>
@@ -866,7 +834,6 @@ function JobsSection({
             No jobs yet. Harvest jobs in the Job Harvester app first.
           </p>
         )}
-      </div>
     </div>
   );
 }
