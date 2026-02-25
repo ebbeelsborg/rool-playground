@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { RoolClient, RoolSpace } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
 import {
@@ -6,6 +6,7 @@ import {
   FileText,
   Building2,
   BarChart3,
+  ScrollText,
   Star,
   Inbox,
   EyeOff,
@@ -23,10 +24,11 @@ import {
   COMPANY_BLACKLIST_ID,
   COMPANY_WHITELIST_ID,
   HARVEST_PROMPT_CONFIG_ID,
+  AUDIT_LOG_ID,
   INITIAL_FILTER_RULES,
   DEFAULT_HARVEST_PROMPT,
 } from "./constants";
-import { passesJobFilter } from "./filters";
+import { passesJobFilter, getFilterFailureReason } from "./filters";
 import { Toaster } from "./Toaster";
 
 const SPACE_NAME = "Remote Job Harvest";
@@ -36,7 +38,7 @@ const FILTERED_OUT_RECORD_INTERVAL_MS = 5 * 60 * 1000; // 5 min min interval
 
 type JobStatus = "inbox" | "saved" | "discarded";
 type Bucket = "inbox" | "saved" | "discarded";
-type Section = "jobs" | "prompt" | "companies" | "stats";
+type Section = "jobs" | "prompt" | "companies" | "stats" | "audit";
 
 function getJobStatus(job: RoolObject): JobStatus {
   const s = job.status as string | undefined;
@@ -117,6 +119,9 @@ export default function App() {
     const s = localStorage.getItem("job-harvester-theme");
     return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
   });
+  const [auditEntries, setAuditEntries] = useState<
+    { timestamp: number; jobId: string; jobTitle: string; reason: string }[]
+  >([]);
 
   useEffect(() => {
     const roolClient = new RoolClient();
@@ -221,8 +226,22 @@ export default function App() {
       };
       await ensureObjects();
 
+      const ensureAuditLog = async () => {
+        const audit = await s.getObject(AUDIT_LOG_ID);
+        if (!audit) {
+          await s.createObject({
+            data: {
+              id: AUDIT_LOG_ID,
+              type: "auditLog",
+              entries: [],
+            },
+          });
+        }
+      };
+      await ensureAuditLog();
+
       const refresh = async () => {
-        const [jobRes, companyRes, blRes, wlRes, promptRes, knowledgeRes] =
+        const [jobRes, companyRes, blRes, wlRes, promptRes, knowledgeRes, auditRes] =
           await Promise.all([
             s.findObjects({ where: { type: "job" }, limit: 200 }),
             s.findObjects({ where: { type: "company" }, limit: 100 }),
@@ -230,6 +249,7 @@ export default function App() {
             s.getObject(COMPANY_WHITELIST_ID),
             s.getObject(HARVEST_PROMPT_CONFIG_ID),
             s.getObject(HARVEST_KNOWLEDGE_ID),
+            s.getObject(AUDIT_LOG_ID),
           ]);
         if (mounted) {
           setJobs(jobRes.objects);
@@ -245,6 +265,22 @@ export default function App() {
               currentVersion: Number(cfg.currentVersion ?? 1),
               versionHistory: ensureVersionHistory(cfg.versionHistory),
             });
+          }
+          const entries = auditRes?.entries;
+          if (Array.isArray(entries)) {
+            setAuditEntries(
+              entries
+                .filter(
+                  (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string } =>
+                    typeof e === "object" &&
+                    e !== null &&
+                    typeof (e as { timestamp?: unknown }).timestamp === "number" &&
+                    typeof (e as { jobId?: unknown }).jobId === "string" &&
+                    typeof (e as { jobTitle?: unknown }).jobTitle === "string" &&
+                    typeof (e as { reason?: unknown }).reason === "string"
+                )
+                .slice(-500)
+            );
           }
         }
       };
@@ -268,6 +304,55 @@ export default function App() {
       currentSpace?.close();
     };
   }, [authState, client]);
+
+  const loggedFilteredJobIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!space || jobs.length === 0) return;
+    const toLog: { timestamp: number; jobId: string; jobTitle: string; reason: string }[] = [];
+    for (const j of jobs) {
+      const reason = getFilterFailureReason({
+        title: String(j.title ?? ""),
+        description: j.description as string | null | undefined,
+        level: j.level as string | null | undefined,
+        location: j.location as string | string[] | null | undefined,
+      });
+      if (reason && !loggedFilteredJobIds.current.has(j.id)) {
+        toLog.push({
+          timestamp: Date.now(),
+          jobId: j.id,
+          jobTitle: String(j.title ?? "Unknown"),
+          reason,
+        });
+        loggedFilteredJobIds.current.add(j.id);
+      }
+    }
+    if (toLog.length === 0) return;
+    (async () => {
+      try {
+        const audit = await space.getObject(AUDIT_LOG_ID);
+        const current = Array.isArray(audit?.entries) ? audit.entries : [];
+        const next = [...current, ...toLog].slice(-500);
+        await space.updateObject(AUDIT_LOG_ID, {
+          data: { entries: next },
+        });
+        setAuditEntries(
+          next
+            .filter(
+              (e): e is { timestamp: number; jobId: string; jobTitle: string; reason: string } =>
+                typeof e === "object" &&
+                e !== null &&
+                typeof (e as { timestamp?: unknown }).timestamp === "number" &&
+                typeof (e as { jobId?: unknown }).jobId === "string" &&
+                typeof (e as { jobTitle?: unknown }).jobTitle === "string" &&
+                typeof (e as { reason?: unknown }).reason === "string"
+            )
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [space, jobs]);
 
   const handleLogin = () => {
     client?.login("Job Harvester");
@@ -515,6 +600,7 @@ export default function App() {
     { id: "prompt", label: "Prompts", icon: FileText },
     { id: "companies", label: "Companies", icon: Building2 },
     { id: "stats", label: "Stats", icon: BarChart3 },
+    { id: "audit", label: "Audit Log", icon: ScrollText },
   ];
 
   return (
@@ -543,22 +629,24 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
-          <button
-            onClick={handleHarvest}
-            disabled={harvesting}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {harvesting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Harvesting…
-              </>
-            ) : (
-              "Run Harvest"
-            )}
-          </button>
-        </div>
+        {(section === "jobs" || section === "stats") && (
+          <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
+            <button
+              onClick={handleHarvest}
+              disabled={harvesting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {harvesting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Harvesting…
+                </>
+              ) : (
+                "Run Harvest"
+              )}
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main content */}
@@ -569,6 +657,7 @@ export default function App() {
             {section === "prompt" && "Prompts"}
             {section === "companies" && "Companies"}
             {section === "stats" && "Statistics"}
+            {section === "audit" && "Audit Log"}
           </h2>
           <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
             <button
@@ -627,8 +716,6 @@ export default function App() {
               filteredJobs={filteredJobs}
               onSave={handleSave}
               onDiscard={handleDiscardOpen}
-              onHarvest={handleHarvest}
-              harvesting={harvesting}
             />
           )}
           {section === "prompt" && (
@@ -663,7 +750,12 @@ export default function App() {
               blacklist={blacklist}
               manualHarvestCount={manualHarvestCount}
               automaticHarvestCount={automaticHarvestCount}
+              onHarvest={handleHarvest}
+              harvesting={harvesting}
             />
+          )}
+          {section === "audit" && (
+            <AuditLogSection auditEntries={auditEntries} />
           )}
         </div>
 
@@ -858,8 +950,6 @@ function JobsSection({
   filteredJobs,
   onSave,
   onDiscard,
-  onHarvest,
-  harvesting,
 }: {
   bucket: Bucket;
   setBucket: (b: Bucket) => void;
@@ -869,12 +959,10 @@ function JobsSection({
   filteredJobs: RoolObject[];
   onSave: (j: RoolObject) => void;
   onDiscard: (j: RoolObject) => void;
-  onHarvest: () => void;
-  harvesting: boolean;
 }) {
   return (
     <div className="flex gap-6">
-      {/* Left pane: bucket filters + Run Harvest at bottom */}
+      {/* Left pane: bucket filters only */}
       <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
         <div>
           <button
@@ -909,22 +997,6 @@ function JobsSection({
           >
             <EyeOff className="h-4 w-4 shrink-0" />
             Ignored ({discardedCount})
-          </button>
-        </div>
-        <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700">
-          <button
-            onClick={onHarvest}
-            disabled={harvesting}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {harvesting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Harvesting…
-              </>
-            ) : (
-              "Run Harvest"
-            )}
           </button>
         </div>
       </div>
@@ -1323,8 +1395,8 @@ function FilteredOutLineChart({
   data: { t: number; c: number }[];
 }) {
   if (data.length < 2) return null;
-  const width = 400;
-  const height = 120;
+  const width = 280;
+  const height = 80;
   const padding = { top: 8, right: 8, bottom: 24, left: 36 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
@@ -1408,7 +1480,7 @@ function PieChart({
   total: number;
 }) {
   let startAngle = 0;
-  const size = 120;
+  const size = 80;
 
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" className="shrink-0">
@@ -1445,6 +1517,8 @@ function StatsSection({
   blacklist,
   manualHarvestCount,
   automaticHarvestCount,
+  onHarvest,
+  harvesting,
 }: {
   jobs: RoolObject[];
   companies: RoolObject[];
@@ -1452,6 +1526,8 @@ function StatsSection({
   blacklist: string[];
   manualHarvestCount: number;
   automaticHarvestCount: number;
+  onHarvest: () => void;
+  harvesting: boolean;
 }) {
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
   const savedCount = jobs.filter((j) => getJobStatus(j) === "saved").length;
@@ -1530,33 +1606,52 @@ function StatsSection({
   const companiesPieTotal = companies.length + whitelist.length + blacklist.length;
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Manual harvests</p>
-          <p className="text-2xl font-semibold">{manualHarvestCount}</p>
+    <div className="flex gap-6">
+      {/* Left pane: Run Harvest at bottom */}
+      <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <button
+          onClick={onHarvest}
+          disabled={harvesting}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {harvesting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Harvesting…
+            </>
+          ) : (
+            "Run Harvest"
+          )}
+        </button>
+      </div>
+
+      {/* Right: stats content */}
+      <div className="min-w-0 flex-1 space-y-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Manual harvests</p>
+          <p className="text-xl font-semibold">{manualHarvestCount}</p>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Automatic harvests</p>
-          <p className="text-2xl font-semibold">{automaticHarvestCount}</p>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Automatic harvests</p>
+          <p className="text-xl font-semibold">{automaticHarvestCount}</p>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Total jobs</p>
-          <p className="text-2xl font-semibold">{jobs.length}</p>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Total jobs</p>
+          <p className="text-xl font-semibold">{jobs.length}</p>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Companies</p>
-          <p className="text-2xl font-semibold">{companies.length}</p>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Companies</p>
+          <p className="text-xl font-semibold">{companies.length}</p>
         </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Filtered out over time
         </h3>
-        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-500">
-          Jobs that don&apos;t meet criteria (software engineer, senior/AI, fully
-          remote, no geo restrictions). Current: <strong>{filteredOutCount}</strong>
+        <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-500">
+          Current: <strong>{filteredOutCount}</strong>
         </p>
         {filteredOutHistory.length >= 2 ? (
           <FilteredOutLineChart data={filteredOutHistory} />
@@ -1567,8 +1662,8 @@ function StatsSection({
         )}
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Jobs by status
         </h3>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -1595,8 +1690,8 @@ function StatsSection({
         </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <h3 className="mb-4 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+      <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h3 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           Companies by category
         </h3>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -1622,6 +1717,57 @@ function StatsSection({
           )}
         </div>
       </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogSection({
+  auditEntries,
+}: {
+  auditEntries: { timestamp: number; jobId: string; jobTitle: string; reason: string }[];
+}) {
+  const sorted = [...auditEntries].sort((a, b) => b.timestamp - a.timestamp);
+  return (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50">
+            <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
+              Time
+            </th>
+            <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
+              Job
+            </th>
+            <th className="px-4 py-2 text-left font-medium text-zinc-600 dark:text-zinc-400">
+              Reason
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((e, i) => (
+            <tr
+              key={`${e.jobId}-${e.timestamp}-${i}`}
+              className="border-b border-zinc-200 last:border-0 dark:border-zinc-800/50"
+            >
+              <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
+                {new Date(e.timestamp).toLocaleString()}
+              </td>
+              <td className="px-4 py-2 text-zinc-800 dark:text-zinc-200">
+                {e.jobTitle}
+              </td>
+              <td className="px-4 py-2 text-zinc-600 dark:text-zinc-300">
+                {e.reason}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {sorted.length === 0 && (
+        <p className="py-8 text-center text-zinc-500">
+          No audit entries yet. Filtered-out jobs will appear here.
+        </p>
+      )}
     </div>
   );
 }

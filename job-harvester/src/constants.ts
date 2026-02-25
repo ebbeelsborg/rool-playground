@@ -2,6 +2,7 @@ export const HARVEST_KNOWLEDGE_ID = "harvest-knowledge";
 export const COMPANY_BLACKLIST_ID = "company-blacklist";
 export const COMPANY_WHITELIST_ID = "company-whitelist";
 export const HARVEST_PROMPT_CONFIG_ID = "harvest-prompt-config";
+export const AUDIT_LOG_ID = "harvest-audit-log";
 
 /** Max visits per domain per 24 hours */
 export const VISIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;

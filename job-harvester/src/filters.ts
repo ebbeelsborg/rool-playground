@@ -186,3 +186,20 @@ export function passesJobFilter(job: JobCandidate): boolean {
   if (hasAmericasOrEMEATimezoneRestriction(job.description, job.title)) return false;
   return true;
 }
+
+/**
+ * Returns the reason a job was filtered out, or null if it passes.
+ */
+export function getFilterFailureReason(job: JobCandidate): string | null {
+  if (!isSoftwareEngineerRole(job.title))
+    return "Not a software engineer/developer role";
+  if (!isSeniorOrAIRole(job.title, job.level))
+    return "Not senior level or AI/ML role";
+  if (!isFullyRemote(job.location, job.description))
+    return "Not fully remote (hybrid/on-site)";
+  if (descriptionIndicatesGeoRestriction(job.description, job.title))
+    return "Geo restriction (country/citizenship/visa)";
+  if (hasAmericasOrEMEATimezoneRestriction(job.description, job.title))
+    return "Americas/EMEA timezone restriction";
+  return null;
+}

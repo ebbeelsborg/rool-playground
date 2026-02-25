@@ -8,8 +8,6 @@ const SPACE_NAME = "Remote Job Harvest";
 const RESUME_OBJECT_ID = "job-matcher-resume";
 const RESUME_CONFIG_ID = "job-matcher-resume-config";
 const MATCHER_STATS_ID = "job-matcher-stats";
-const HARVEST_KNOWLEDGE_ID = "harvest-knowledge";
-
 const EXTRACT_KEYWORDS_PROMPT = `Extract all skills and technologies from the resume object. Return a JSON object with a "keywords" array of strings. Include: programming languages, frameworks, tools, methodologies, and relevant technical terms. Normalize variations (e.g. "React" not "React.js").`;
 
 type Section = "jobs" | "resumes" | "stats";
@@ -94,7 +92,6 @@ export default function App() {
     const s = localStorage.getItem("job-matcher-theme");
     return (s === "light" || s === "dark" || s === "system" ? s : "dark") as "light" | "dark" | "system";
   });
-  const [uniqueDomains, setUniqueDomains] = useState(0);
   const [matchesRun, setMatchesRun] = useState(0);
 
   const addLog = (type: LogEntry["type"], message: string) => {
@@ -192,10 +189,9 @@ export default function App() {
       await ensureMatcherStats();
 
       const refresh = async () => {
-        const [jobRes, cfgRes, knowledgeRes, statsRes] = await Promise.all([
+        const [jobRes, cfgRes, statsRes] = await Promise.all([
           s.findObjects({ where: { type: "job" }, limit: 200 }),
           s.getObject(RESUME_CONFIG_ID),
-          s.getObject(HARVEST_KNOWLEDGE_ID),
           s.getObject(MATCHER_STATS_ID),
         ]);
         if (mounted) {
@@ -207,18 +203,6 @@ export default function App() {
               currentVersion: Number(cfg.currentVersion ?? 0),
               versionHistory: ensureVersionHistory(cfg.versionHistory),
             });
-          }
-          try {
-            const vd = knowledgeRes?.visitedDomains;
-            const domains =
-              typeof vd === "string"
-                ? Object.keys(JSON.parse(vd || "{}"))
-                : typeof vd === "object" && vd !== null
-                  ? Object.keys(vd)
-                  : [];
-            setUniqueDomains(domains.length);
-          } catch {
-            setUniqueDomains(0);
           }
           setMatchesRun(Number(statsRes?.matchRunCount ?? 0));
         }
@@ -635,11 +619,7 @@ export default function App() {
               />
             )}
             {section === "stats" && (
-              <StatsSection
-                jobs={jobs}
-                uniqueDomains={uniqueDomains}
-                matchesRun={matchesRun}
-              />
+              <StatsSection jobs={jobs} matchesRun={matchesRun} />
             )}
           </div>
 
@@ -738,11 +718,9 @@ function getJobStatus(job: RoolObject): "inbox" | "saved" | "discarded" {
 
 function StatsSection({
   jobs,
-  uniqueDomains,
   matchesRun,
 }: {
   jobs: RoolObject[];
-  uniqueDomains: number;
   matchesRun: number;
 }) {
   const inboxCount = jobs.filter((j) => getJobStatus(j) === "inbox").length;
@@ -758,15 +736,9 @@ function StatsSection({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Unique web pages queried
-          </p>
-          <p className="text-2xl font-semibold">{uniqueDomains}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Jobs fetched</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Jobs matched</p>
           <p className="text-2xl font-semibold">{jobs.length}</p>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
