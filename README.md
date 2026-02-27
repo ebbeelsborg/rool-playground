@@ -1,5 +1,7 @@
 # Rool Job Harvester & Job Matcher
 
+Check. Them. Out.
+
 **→ [Job Harvester](https://rool-job-harvester.vercel.app/)**
 
 **→ [Job Matcher](https://rool-job-matcher.vercel.app/)**
