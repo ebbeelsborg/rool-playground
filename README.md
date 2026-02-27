@@ -1,6 +1,9 @@
 # Rool Job Harvester & Job Matcher
 
-LLM-powered apps for harvesting remote software engineer jobs and matching them to your resume. Built on the [Rool SDK](https://docs.rool.dev/) with Gemini via Rool's token quota.
+**→ [Job Harvester](https://rool-job-harvester.vercel.app/)**
+**→ [Job Matcher](https://rool-job-matcher.vercel.app/)**
+
+LLM-powered apps for harvesting remote software engineer jobs and matching them to your resume. Built on the [Rool SDK](https://docs.rool.dev/) with frontends hosted on [Vercel(https://vercel.com/).
 
 ## Apps
 
