@@ -376,15 +376,24 @@ export default function App() {
 
     const startTime = Date.now();
     const maxMs = 60_000;
+    const clientTimeoutMs = 75_000; // Slightly longer than server ~1 min — ensures button resets if server never responds
     const progressInterval = setInterval(() => {
       const elapsed = Date.now() - startTime;
       setHarvestProgress(Math.min(100, (elapsed / maxMs) * 100));
     }, 200);
 
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error("Harvest timed out. The job list may have updated — check above.")),
+        clientTimeoutMs
+      );
+    });
+
     try {
-      const { message, objects } = await channel.prompt(promptText, {
-        effort: "REASONING",
-      });
+      const { message, objects } = await Promise.race([
+        channel.prompt(promptText, { effort: "REASONING" }),
+        timeoutPromise,
+      ]);
       clearInterval(progressInterval);
       setHarvestProgress(100);
       setLastMessage(message);
