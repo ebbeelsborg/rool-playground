@@ -34,22 +34,19 @@ async function main() {
 
   console.log("Authenticated. Creating or opening space...");
 
-  let space;
   const spaces = await client.listSpaces();
   const existing = spaces.find((s) => s.name === SPACE_NAME);
-  if (existing) {
-    space = await client.openSpace(existing.id);
-    console.log(`Opened existing space: ${space.name} (${space.id})`);
-  } else {
-    space = await client.createSpace(SPACE_NAME);
-    console.log(`Created new space: ${space.name} (${space.id})`);
-  }
+  const space = existing
+    ? await client.openSpace(existing.id)
+    : await client.createSpace(SPACE_NAME);
+  console.log(`Opened space: ${space.name} (${space.id})`);
 
-  await space.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
+  const channel = await space.openChannel("main");
+  await channel.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
 
-  let knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+  let knowledge = await channel.getObject(HARVEST_KNOWLEDGE_ID);
   if (!knowledge) {
-    await space.createObject({
+    await channel.createObject({
       data: {
         id: HARVEST_KNOWLEDGE_ID,
         type: "harvestKnowledge",
@@ -60,7 +57,7 @@ async function main() {
     });
     console.log("Created harvest knowledge object.");
   } else if (knowledge.visitedDomains == null || knowledge.visitedDomains === undefined) {
-    await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+    await channel.updateObject(HARVEST_KNOWLEDGE_ID, {
       data: { visitedDomains: INITIAL_VISITED_DOMAINS },
       ephemeral: true,
     });
@@ -76,19 +73,19 @@ async function main() {
       { currentText: DEFAULT_HARVEST_PROMPT, currentVersion: 1, versionHistory: [] },
     ],
   ] as const) {
-    const obj = await space.getObject(id);
+    const obj = await channel.getObject(id);
     if (!obj) {
-      await space.createObject({ data: { id, type, ...data } });
+      await channel.createObject({ data: { id, type, ...data } });
       console.log(`Created ${type} object.`);
     }
   }
   console.log("System instruction set.");
 
-  const promptCfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
+  const promptCfg = await channel.getObject(HARVEST_PROMPT_CONFIG_ID);
   const promptText = String(promptCfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
 
   console.log("Starting harvest (AI will search and crawl company careers pages)...");
-  const { message, objects } = await space.prompt(promptText, {
+  const { message, objects } = await channel.prompt(promptText, {
     effort: "REASONING",
   });
 
@@ -96,7 +93,7 @@ async function main() {
   console.log(message);
   console.log(`\nModified ${objects.length} objects`);
 
-  space.close();
+  channel.close();
   client.destroy();
 }
 

@@ -3,6 +3,7 @@
  * The per-site limit is enforced via visitedDomains in the harvestKnowledge object.
  */
 
+import type { RoolChannel } from "@rool-dev/sdk";
 import { RoolClient } from "@rool-dev/sdk";
 import { NodeAuthProvider } from "@rool-dev/sdk/node";
 import { JOB_FILTER_SYSTEM_INSTRUCTION } from "../src/prompt.js";
@@ -21,10 +22,10 @@ const INITIAL_VISITED_DOMAINS = "{}";
 /** Minutes between harvest runs */
 const INTERVAL_MINUTES = 60;
 
-async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
-  const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+async function runHarvest(channel: RoolChannel) {
+  const knowledge = await channel.getObject(HARVEST_KNOWLEDGE_ID);
   if (!knowledge) {
-    await space.createObject({
+    await channel.createObject({
       data: {
         id: HARVEST_KNOWLEDGE_ID,
         type: "harvestKnowledge",
@@ -36,7 +37,7 @@ async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
       },
     });
   } else if (knowledge.visitedDomains == null || knowledge.visitedDomains === undefined) {
-    await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+    await channel.updateObject(HARVEST_KNOWLEDGE_ID, {
       data: { visitedDomains: INITIAL_VISITED_DOMAINS },
       ephemeral: true,
     });
@@ -51,20 +52,20 @@ async function runHarvest(space: Awaited<ReturnType<RoolClient["openSpace"]>>) {
       { currentText: DEFAULT_HARVEST_PROMPT, currentVersion: 1, versionHistory: [] },
     ],
   ] as const) {
-    const obj = await space.getObject(id);
-    if (!obj) await space.createObject({ data: { id, type, ...data } });
+    const obj = await channel.getObject(id);
+    if (!obj) await channel.createObject({ data: { id, type, ...data } });
   }
 
-  const promptCfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
+  const promptCfg = await channel.getObject(HARVEST_PROMPT_CONFIG_ID);
   const promptText = String(promptCfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
 
-  const { message, objects } = await space.prompt(promptText, {
+  const { message, objects } = await channel.prompt(promptText, {
     effort: "REASONING",
   });
 
-  const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
-  const count = Number(knowledge?.automaticHarvestCount ?? 0) + 1;
-  await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+  const knowledgeAfter = await channel.getObject(HARVEST_KNOWLEDGE_ID);
+  const count = Number(knowledgeAfter?.automaticHarvestCount ?? 0) + 1;
+  await channel.updateObject(HARVEST_KNOWLEDGE_ID, {
     data: { automaticHarvestCount: count },
     ephemeral: true,
   });
@@ -91,14 +92,15 @@ async function main() {
     ? await client.openSpace(existing.id)
     : await client.createSpace(SPACE_NAME);
 
-  await space.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
+  const channel = await space.openChannel("main");
+  await channel.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
 
   console.log(`Harvester running continuously. Interval: ${INTERVAL_MINUTES} min. Each site visited max once per day.`);
   console.log("Press Ctrl+C to stop.\n");
 
   process.on("SIGINT", () => {
     console.log("\nShutting down...");
-    space.close();
+    channel.close();
     client.destroy();
     process.exit(0);
   });
@@ -109,7 +111,7 @@ async function main() {
     const start = Date.now();
     try {
       console.log(`[Run ${runCount}] Starting harvest at ${new Date().toISOString()}`);
-      const { message, objects } = await runHarvest(space);
+      const { message, objects } = await runHarvest(channel);
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
       console.log(`[Run ${runCount}] Done in ${elapsed}s. Modified ${objects.length} objects.`);
       if (message) {

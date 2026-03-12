@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RoolClient, RoolSpace } from "@rool-dev/sdk";
+import { RoolClient, RoolChannel } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
 import { Briefcase, FileText, BarChart3, Loader2, ChevronDown, ChevronRight, Sun, Moon, Monitor, Check, XCircle } from "lucide-react";
 import { extractTextFromPdf } from "./pdfUtils";
@@ -68,7 +68,7 @@ function ensureVersionHistory(v: unknown): ResumeVersion[] {
 
 export default function App() {
   const [client, setClient] = useState<RoolClient | null>(null);
-  const [space, setSpace] = useState<RoolSpace | null>(null);
+  const [channel, setChannel] = useState<RoolChannel | null>(null);
   const [authState, setAuthState] = useState<
     "loading" | "unauthenticated" | "ready"
   >("loading");
@@ -136,30 +136,31 @@ export default function App() {
     if (authState !== "ready" || !client) return;
 
     let mounted = true;
-    let currentSpace: RoolSpace | null = null;
+    let currentChannel: RoolChannel | null = null;
 
     (async () => {
       const spaces = await client.listSpaces();
       const existing = spaces.find((s) => s.name === SPACE_NAME);
-      const s = existing
+      const space = existing
         ? await client.openSpace(existing.id)
         : await client.createSpace(SPACE_NAME);
+      const ch = await space.openChannel("main");
       if (!mounted) {
-        s.close();
+        ch.close();
         return;
       }
-      currentSpace = s;
-      setSpace(s);
+      currentChannel = ch;
+      setChannel(ch);
 
       const ensureResumeConfig = async () => {
         const [cfg, resume] = await Promise.all([
-          s.getObject(RESUME_CONFIG_ID),
-          s.getObject(RESUME_OBJECT_ID),
+          ch.getObject(RESUME_CONFIG_ID),
+          ch.getObject(RESUME_OBJECT_ID),
         ]);
         if (!cfg) {
           const existingText = String(resume?.text ?? "").trim();
           const hasExisting = existingText.length > 0;
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: RESUME_CONFIG_ID,
               type: "resumeConfig",
@@ -175,9 +176,9 @@ export default function App() {
       await ensureResumeConfig();
 
       const ensureMatcherStats = async () => {
-        const stats = await s.getObject(MATCHER_STATS_ID);
+        const stats = await ch.getObject(MATCHER_STATS_ID);
         if (!stats) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: MATCHER_STATS_ID,
               type: "matcherStats",
@@ -190,9 +191,9 @@ export default function App() {
 
       const refresh = async () => {
         const [jobRes, cfgRes, statsRes] = await Promise.all([
-          s.findObjects({ where: { type: "job" }, limit: 200 }),
-          s.getObject(RESUME_CONFIG_ID),
-          s.getObject(MATCHER_STATS_ID),
+          ch.findObjects({ where: { type: "job" }, limit: 200 }),
+          ch.getObject(RESUME_CONFIG_ID),
+          ch.getObject(MATCHER_STATS_ID),
         ]);
         if (mounted) {
           setJobs(jobRes.objects);
@@ -210,19 +211,19 @@ export default function App() {
       const onObjectChange = () => refresh();
       await refresh();
 
-      s.on("objectCreated", onObjectChange);
-      s.on("objectUpdated", onObjectChange);
+      ch.on("objectCreated", onObjectChange);
+      ch.on("objectUpdated", onObjectChange);
 
       return () => {
-        s.off("objectCreated", onObjectChange);
-        s.off("objectUpdated", onObjectChange);
-        s.close();
+        ch.off("objectCreated", onObjectChange);
+        ch.off("objectUpdated", onObjectChange);
+        ch.close();
       };
     })();
 
     return () => {
       mounted = false;
-      currentSpace?.close();
+      currentChannel?.close();
     };
   }, [authState, client]);
 
@@ -232,19 +233,19 @@ export default function App() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !space) return;
+    if (!file || !channel) return;
     try {
       const text = await extractTextFromPdf(file);
       addLog("progress", `Resume extracted: ${text.length} characters`);
 
-      const existingResume = await space.getObject(RESUME_OBJECT_ID);
+      const existingResume = await channel.getObject(RESUME_OBJECT_ID);
       if (existingResume) {
-        await space.updateObject(RESUME_OBJECT_ID, {
+        await channel.updateObject(RESUME_OBJECT_ID, {
           data: { text, updatedAt: Date.now() },
           ephemeral: true,
         });
       } else {
-        await space.createObject({
+        await channel.createObject({
           data: {
             id: RESUME_OBJECT_ID,
             type: "resume",
@@ -255,7 +256,7 @@ export default function App() {
       }
 
       addLog("progress", "Extracting keywords from resume…");
-      const { message } = await space.prompt(EXTRACT_KEYWORDS_PROMPT, {
+      const { message } = await channel.prompt(EXTRACT_KEYWORDS_PROMPT, {
         objectIds: [RESUME_OBJECT_ID],
         effort: "REASONING",
         responseSchema: {
@@ -282,7 +283,7 @@ export default function App() {
       }
       addLog("result", `Extracted ${keywords.length} keywords`);
 
-      const cfg = await space.getObject(RESUME_CONFIG_ID);
+      const cfg = await channel.getObject(RESUME_CONFIG_ID);
       const currentVersion = Number(cfg?.currentVersion ?? 0);
       const history = ensureVersionHistory(cfg?.versionHistory ?? []);
       const newVersion = currentVersion + 1;
@@ -291,7 +292,7 @@ export default function App() {
         { version: newVersion, text, createdAt: Date.now(), keywords },
       ];
 
-      await space.updateObject(RESUME_CONFIG_ID, {
+      await channel.updateObject(RESUME_CONFIG_ID, {
         data: {
           currentText: text,
           currentVersion: newVersion,
@@ -317,10 +318,10 @@ export default function App() {
     let resumeKeywords = getCurrentResumeKeywords(resumeConfig);
     if (resumeKeywords.size === 0 && (resumeConfig.currentText?.length ?? 0) > 0) {
       addLog("progress", "Resume exists but keywords missing. Extracting keywords…");
-      const resume = await space.getObject(RESUME_OBJECT_ID);
+      const resume = await channel.getObject(RESUME_OBJECT_ID);
       if (resume?.text) {
         try {
-          const { message } = await space.prompt(EXTRACT_KEYWORDS_PROMPT, {
+          const { message } = await channel.prompt(EXTRACT_KEYWORDS_PROMPT, {
             objectIds: [RESUME_OBJECT_ID],
             effort: "REASONING",
             responseSchema: {
@@ -357,7 +358,7 @@ export default function App() {
                 keywords,
               });
             }
-            await space.updateObject(RESUME_CONFIG_ID, {
+            await channel.updateObject(RESUME_CONFIG_ID, {
               data: { versionHistory: history },
               ephemeral: true,
             });
@@ -388,16 +389,16 @@ export default function App() {
       const jobTitle = String(job.title ?? "Unknown");
       const tags = getJobTags(job);
       const matchScore = computeMatchScore(tags, resumeKeywords);
-      await space.updateObject(job.id, {
+      await channel.updateObject(job.id, {
         data: { matchScore },
         ephemeral: true,
       });
       addLog("result", `${jobTitle}: ${matchScore}% match`);
     }
 
-    const stats = await space.getObject(MATCHER_STATS_ID);
+    const stats = await channel.getObject(MATCHER_STATS_ID);
     const count = Number(stats?.matchRunCount ?? 0) + 1;
-    await space.updateObject(MATCHER_STATS_ID, {
+    await channel.updateObject(MATCHER_STATS_ID, {
       data: { matchRunCount: count },
       ephemeral: true,
     });
@@ -406,7 +407,7 @@ export default function App() {
     addLog("result", `Match complete for ${jobsToMatch.length} jobs`);
     setMatching(false);
 
-    const jobRes = await space.findObjects({
+    const jobRes = await channel.findObjects({
       where: { type: "job" },
       limit: 200,
     });
@@ -415,17 +416,17 @@ export default function App() {
 
   const handleResumeRestore = async (v: { version: number; text: string }) => {
     if (!space) return;
-    const cfg = await space.getObject(RESUME_CONFIG_ID);
+    const cfg = await channel.getObject(RESUME_CONFIG_ID);
     const history = ensureVersionHistory(cfg?.versionHistory ?? []);
 
-    const existingResume = await space.getObject(RESUME_OBJECT_ID);
+    const existingResume = await channel.getObject(RESUME_OBJECT_ID);
     if (existingResume) {
-      await space.updateObject(RESUME_OBJECT_ID, {
+      await channel.updateObject(RESUME_OBJECT_ID, {
         data: { text: v.text, updatedAt: Date.now() },
         ephemeral: true,
       });
     } else {
-      await space.createObject({
+      await channel.createObject({
         data: {
           id: RESUME_OBJECT_ID,
           type: "resume",
@@ -435,7 +436,7 @@ export default function App() {
       });
     }
 
-    await space.updateObject(RESUME_CONFIG_ID, {
+    await channel.updateObject(RESUME_CONFIG_ID, {
       data: {
         currentText: v.text,
         currentVersion: v.version,

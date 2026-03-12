@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { RoolClient, RoolSpace } from "@rool-dev/sdk";
+import { RoolClient, RoolChannel } from "@rool-dev/sdk";
 import type { RoolObject } from "@rool-dev/sdk";
 import {
   Briefcase,
@@ -77,7 +77,7 @@ function displayCompanyName(name: string): string {
 
 export default function App() {
   const [client, setClient] = useState<RoolClient | null>(null);
-  const [space, setSpace] = useState<RoolSpace | null>(null);
+  const [channel, setChannel] = useState<RoolChannel | null>(null);
   const [authState, setAuthState] = useState<
     "loading" | "unauthenticated" | "ready"
   >("loading");
@@ -154,32 +154,33 @@ export default function App() {
     if (authState !== "ready" || !client) return;
 
     let mounted = true;
-    let currentSpace: RoolSpace | null = null;
+    let currentChannel: RoolChannel | null = null;
 
     (async () => {
       const spaces = await client.listSpaces();
       const existing = spaces.find((s) => s.name === SPACE_NAME);
-      const s = existing
+      const space = existing
         ? await client.openSpace(existing.id)
         : await client.createSpace(SPACE_NAME);
+      const ch = await space.openChannel("main");
       if (!mounted) {
-        s.close();
+        ch.close();
         return;
       }
-      currentSpace = s;
-      setSpace(s);
-      await s.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
+      currentChannel = ch;
+      setChannel(ch);
+      await ch.setSystemInstruction(JOB_FILTER_SYSTEM_INSTRUCTION);
 
       const ensureObjects = async () => {
         const [knowledge, bl, wl, promptCfg] = await Promise.all([
-          s.getObject(HARVEST_KNOWLEDGE_ID),
-          s.getObject(COMPANY_BLACKLIST_ID),
-          s.getObject(COMPANY_WHITELIST_ID),
-          s.getObject(HARVEST_PROMPT_CONFIG_ID),
+          ch.getObject(HARVEST_KNOWLEDGE_ID),
+          ch.getObject(COMPANY_BLACKLIST_ID),
+          ch.getObject(COMPANY_WHITELIST_ID),
+          ch.getObject(HARVEST_PROMPT_CONFIG_ID),
         ]);
 
         if (!knowledge) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: HARVEST_KNOWLEDGE_ID,
               type: "harvestKnowledge",
@@ -193,7 +194,7 @@ export default function App() {
         }
 
         if (!bl) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: COMPANY_BLACKLIST_ID,
               type: "companyBlacklist",
@@ -203,7 +204,7 @@ export default function App() {
         }
 
         if (!wl) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: COMPANY_WHITELIST_ID,
               type: "companyWhitelist",
@@ -213,7 +214,7 @@ export default function App() {
         }
 
         if (!promptCfg) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: HARVEST_PROMPT_CONFIG_ID,
               type: "harvestPromptConfig",
@@ -227,9 +228,9 @@ export default function App() {
       await ensureObjects();
 
       const ensureAuditLog = async () => {
-        const audit = await s.getObject(AUDIT_LOG_ID);
+        const audit = await ch.getObject(AUDIT_LOG_ID);
         if (!audit) {
-          await s.createObject({
+          await ch.createObject({
             data: {
               id: AUDIT_LOG_ID,
               type: "auditLog",
@@ -243,13 +244,13 @@ export default function App() {
       const refresh = async () => {
         const [jobRes, companyRes, blRes, wlRes, promptRes, knowledgeRes, auditRes] =
           await Promise.all([
-            s.findObjects({ where: { type: "job" }, limit: 200 }),
-            s.findObjects({ where: { type: "company" }, limit: 100 }),
-            s.getObject(COMPANY_BLACKLIST_ID),
-            s.getObject(COMPANY_WHITELIST_ID),
-            s.getObject(HARVEST_PROMPT_CONFIG_ID),
-            s.getObject(HARVEST_KNOWLEDGE_ID),
-            s.getObject(AUDIT_LOG_ID),
+            ch.findObjects({ where: { type: "job" }, limit: 200 }),
+            ch.findObjects({ where: { type: "company" }, limit: 100 }),
+            ch.getObject(COMPANY_BLACKLIST_ID),
+            ch.getObject(COMPANY_WHITELIST_ID),
+            ch.getObject(HARVEST_PROMPT_CONFIG_ID),
+            ch.getObject(HARVEST_KNOWLEDGE_ID),
+            ch.getObject(AUDIT_LOG_ID),
           ]);
         if (mounted) {
           setJobs(jobRes.objects);
@@ -288,26 +289,26 @@ export default function App() {
       };
       await refresh();
 
-      s.on("objectCreated", onObjectChange);
-      s.on("objectUpdated", onObjectChange);
+      ch.on("objectCreated", onObjectChange);
+      ch.on("objectUpdated", onObjectChange);
 
       return () => {
-        s.off("objectCreated", onObjectChange);
-        s.off("objectUpdated", onObjectChange);
-        s.close();
+        ch.off("objectCreated", onObjectChange);
+        ch.off("objectUpdated", onObjectChange);
+        ch.close();
       };
     })();
 
     return () => {
       mounted = false;
-      currentSpace?.close();
+      currentChannel?.close();
     };
   }, [authState, client]);
 
   const loggedFilteredJobIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!space || jobs.length === 0) return;
+    if (!channel || jobs.length === 0) return;
     const toLog: { timestamp: number; jobId: string; jobTitle: string; reason: string; url?: string }[] = [];
     for (const j of jobs) {
       const reason = getFilterFailureReason({
@@ -330,10 +331,10 @@ export default function App() {
     if (toLog.length === 0) return;
     (async () => {
       try {
-        const audit = await space.getObject(AUDIT_LOG_ID);
+        const audit = await channel.getObject(AUDIT_LOG_ID);
         const current = Array.isArray(audit?.entries) ? audit.entries : [];
         const next = [...current, ...toLog];
-        await space.updateObject(AUDIT_LOG_ID, {
+        await channel.updateObject(AUDIT_LOG_ID, {
           data: { entries: next },
         });
             setAuditEntries(
@@ -352,15 +353,15 @@ export default function App() {
         /* ignore */
       }
     })();
-  }, [space, jobs]);
+  }, [channel, jobs]);
 
   const handleLogin = () => {
     client?.login("Job Harvester");
   };
 
   const handleHarvest = async () => {
-    if (!space) return;
-    const cfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
+    if (!channel) return;
+    const cfg = await channel.getObject(HARVEST_PROMPT_CONFIG_ID);
     const promptText = String(cfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
     setHarvesting(true);
     setLastMessage(null);
@@ -381,7 +382,7 @@ export default function App() {
     }, 200);
 
     try {
-      const { message, objects } = await space.prompt(promptText, {
+      const { message, objects } = await channel.prompt(promptText, {
         effort: "REASONING",
       });
       clearInterval(progressInterval);
@@ -390,15 +391,15 @@ export default function App() {
       addLog(`AI: ${message}`);
 
       const [jobRes, companyRes] = await Promise.all([
-        space.findObjects({ where: { type: "job" }, limit: 200 }),
-        space.findObjects({ where: { type: "company" }, limit: 100 }),
+        channel.findObjects({ where: { type: "job" }, limit: 200 }),
+        channel.findObjects({ where: { type: "company" }, limit: 100 }),
       ]);
       setJobs(jobRes.objects);
       setCompanies(companyRes.objects);
 
-      const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+      const knowledge = await channel.getObject(HARVEST_KNOWLEDGE_ID);
       const count = Number(knowledge?.manualHarvestCount ?? 0) + 1;
-      await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+      await channel.updateObject(HARVEST_KNOWLEDGE_ID, {
         data: { manualHarvestCount: count },
         ephemeral: true,
       });
@@ -427,7 +428,7 @@ export default function App() {
     companyName: string,
     list: "blacklist" | "whitelist"
   ) => {
-    if (!space) return;
+    if (!channel) return;
     const id =
       list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
     const current = list === "blacklist" ? blacklist : whitelist;
@@ -437,7 +438,7 @@ export default function App() {
     const next = [...current, name].filter((x) => x !== "");
 
     if (otherList.includes(name)) {
-      await space.updateObject(
+      await channel.updateObject(
         list === "blacklist" ? COMPANY_WHITELIST_ID : COMPANY_BLACKLIST_ID,
         {
           data: { companies: otherList.filter((x) => x !== name) },
@@ -445,7 +446,7 @@ export default function App() {
         }
       );
     }
-    await space.updateObject(id, {
+    await channel.updateObject(id, {
       data: { companies: next },
       ephemeral: true,
     });
@@ -455,12 +456,12 @@ export default function App() {
     companyName: string,
     list: "blacklist" | "whitelist"
   ) => {
-    if (!space) return;
+    if (!channel) return;
     const id =
       list === "blacklist" ? COMPANY_BLACKLIST_ID : COMPANY_WHITELIST_ID;
     const current = list === "blacklist" ? blacklist : whitelist;
     const next = current.filter((x) => x !== companyName);
-    await space.updateObject(id, {
+    await channel.updateObject(id, {
       data: { companies: next },
       ephemeral: true,
     });
@@ -473,8 +474,8 @@ export default function App() {
   };
 
   const handlePromptEditSave = async () => {
-    if (!space) return;
-    const cfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
+    if (!channel) return;
+    const cfg = await channel.getObject(HARVEST_PROMPT_CONFIG_ID);
     const currentVersion = Number(cfg?.currentVersion ?? 1);
     const currentText = String(cfg?.currentText ?? DEFAULT_HARVEST_PROMPT);
     const history = ensureVersionHistory(cfg?.versionHistory ?? []);
@@ -483,7 +484,7 @@ export default function App() {
       ...history,
       { version: currentVersion, text: currentText, createdAt: Date.now() },
     ];
-    await space.updateObject(HARVEST_PROMPT_CONFIG_ID, {
+    await channel.updateObject(HARVEST_PROMPT_CONFIG_ID, {
       data: {
         currentText: promptEditText,
         currentVersion: newVersion,
@@ -506,10 +507,10 @@ export default function App() {
   };
 
   const handlePromptRestore = async (v: { version: number; text: string }) => {
-    if (!space) return;
-    const cfg = await space.getObject(HARVEST_PROMPT_CONFIG_ID);
+    if (!channel) return;
+    const cfg = await channel.getObject(HARVEST_PROMPT_CONFIG_ID);
     const history = ensureVersionHistory(cfg?.versionHistory ?? []);
-    await space.updateObject(HARVEST_PROMPT_CONFIG_ID, {
+    await channel.updateObject(HARVEST_PROMPT_CONFIG_ID, {
       data: {
         currentText: v.text,
         currentVersion: v.version,
@@ -525,8 +526,8 @@ export default function App() {
   };
 
   const handleSave = async (job: RoolObject) => {
-    if (!space) return;
-    await space.updateObject(job.id, {
+    if (!channel) return;
+    await channel.updateObject(job.id, {
       data: { status: "saved" },
       ephemeral: true,
     });
@@ -539,19 +540,19 @@ export default function App() {
   };
 
   const handleDiscardConfirm = async () => {
-    if (!space || !discardModal) return;
+    if (!channel || !discardModal) return;
     const { job } = discardModal;
     const reason = discardReason.trim() || "No reason given";
 
-    await space.updateObject(job.id, {
+    await channel.updateObject(job.id, {
       data: { status: "discarded", discardReason: reason },
       ephemeral: true,
     });
 
-    const knowledge = await space.getObject(HARVEST_KNOWLEDGE_ID);
+    const knowledge = await channel.getObject(HARVEST_KNOWLEDGE_ID);
     const currentLog = String(knowledge?.feedbackLog ?? "");
     const entry = `\n[Ignore] Job "${job.title}": ${reason}`;
-    await space.updateObject(HARVEST_KNOWLEDGE_ID, {
+    await channel.updateObject(HARVEST_KNOWLEDGE_ID, {
       data: { feedbackLog: currentLog + entry },
       ephemeral: true,
     });
@@ -562,8 +563,8 @@ export default function App() {
   };
 
   const handleMoveToInbox = async (job: RoolObject) => {
-    if (!space) return;
-    await space.updateObject(job.id, {
+    if (!channel) return;
+    await channel.updateObject(job.id, {
       data: { status: "inbox", discardReason: undefined },
       ephemeral: true,
     });

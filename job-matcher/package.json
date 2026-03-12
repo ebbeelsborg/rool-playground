@@ -2,7 +2,7 @@
   "name": "job-matcher",
   "type": "module",
   "dependencies": {
-    "@rool-dev/sdk": "^0.1.20",
+    "@rool-dev/sdk": "^0.3.0",
     "@tailwindcss/postcss": "^4.2.1",
     "autoprefixer": "^10.4.24",
     "lucide-react": "^0.575.0",
