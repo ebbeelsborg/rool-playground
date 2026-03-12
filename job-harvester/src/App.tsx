@@ -982,7 +982,7 @@ function JobsSection({
     <div className="flex gap-6">
       {/* Left pane: bucket filters only */}
       <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
-        <div>
+        <div className="flex flex-col gap-2">
           <button
             onClick={() => setBucket("inbox")}
             className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${

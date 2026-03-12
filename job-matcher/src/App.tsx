@@ -314,7 +314,7 @@ export default function App() {
   };
 
   const handleMatchAll = async () => {
-    if (!space || !resumeConfig) return;
+    if (!channel || !resumeConfig) return;
     let resumeKeywords = getCurrentResumeKeywords(resumeConfig);
     if (resumeKeywords.size === 0 && (resumeConfig.currentText?.length ?? 0) > 0) {
       addLog("progress", "Resume exists but keywords missing. Extracting keywords…");
@@ -384,38 +384,56 @@ export default function App() {
     setMatching(true);
     addLog("progress", `Matching ${jobsToMatch.length} jobs by keyword overlap`);
 
-    for (let i = 0; i < jobsToMatch.length; i++) {
-      const job = jobsToMatch[i];
-      const jobTitle = String(job.title ?? "Unknown");
-      const tags = getJobTags(job);
-      const matchScore = computeMatchScore(tags, resumeKeywords);
-      await channel.updateObject(job.id, {
-        data: { matchScore },
-        ephemeral: true,
-      });
-      addLog("result", `${jobTitle}: ${matchScore}% match`);
+    const timeoutMs = 120_000; // 2 min — ensures button resets if an operation hangs
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error("Match timed out. Results may have partially updated.")),
+        timeoutMs
+      );
+    });
+
+    try {
+      await Promise.race([
+        (async () => {
+          for (let i = 0; i < jobsToMatch.length; i++) {
+            const job = jobsToMatch[i];
+            const jobTitle = String(job.title ?? "Unknown");
+            const tags = getJobTags(job);
+            const matchScore = computeMatchScore(tags, resumeKeywords);
+            await channel.updateObject(job.id, {
+              data: { matchScore },
+              ephemeral: true,
+            });
+            addLog("result", `${jobTitle}: ${matchScore}% match`);
+          }
+
+          const stats = await channel.getObject(MATCHER_STATS_ID);
+          const count = Number(stats?.matchRunCount ?? 0) + 1;
+          await channel.updateObject(MATCHER_STATS_ID, {
+            data: { matchRunCount: count },
+            ephemeral: true,
+          });
+          setMatchesRun(count);
+
+          addLog("result", `Match complete for ${jobsToMatch.length} jobs`);
+
+          const jobRes = await channel.findObjects({
+            where: { type: "job" },
+            limit: 200,
+          });
+          setJobs(jobRes.objects);
+        })(),
+        timeoutPromise,
+      ]);
+    } catch (err) {
+      addLog("error", err instanceof Error ? err.message : "Match failed");
+    } finally {
+      setMatching(false);
     }
-
-    const stats = await channel.getObject(MATCHER_STATS_ID);
-    const count = Number(stats?.matchRunCount ?? 0) + 1;
-    await channel.updateObject(MATCHER_STATS_ID, {
-      data: { matchRunCount: count },
-      ephemeral: true,
-    });
-    setMatchesRun(count);
-
-    addLog("result", `Match complete for ${jobsToMatch.length} jobs`);
-    setMatching(false);
-
-    const jobRes = await channel.findObjects({
-      where: { type: "job" },
-      limit: 200,
-    });
-    setJobs(jobRes.objects);
   };
 
   const handleResumeRestore = async (v: { version: number; text: string }) => {
-    if (!space) return;
+    if (!channel) return;
     const cfg = await channel.getObject(RESUME_CONFIG_ID);
     const history = ensureVersionHistory(cfg?.versionHistory ?? []);
 
